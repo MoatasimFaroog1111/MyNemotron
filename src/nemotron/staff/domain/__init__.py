@@ -16,20 +16,32 @@ from .model import (
     TaskState,
     Verification,
 )
+from .organization import (
+    DelegationDenied,
+    Department,
+    Organization,
+    OrganizationError,
+    StaffPlacement,
+)
 
 __all__ = [
     "Approval",
     "ApprovalOutcome",
     "Decision",
+    "DelegationDenied",
+    "Department",
     "Evidence",
     "GovernancePolicy",
     "InvalidTransition",
+    "Organization",
+    "OrganizationError",
     "Permission",
     "PermissionDenied",
     "RiskLevel",
     "Role",
     "StaffCoreError",
     "StaffMember",
+    "StaffPlacement",
     "StaffStatus",
     "Task",
     "TaskState",

@@ -1,3 +1,16 @@
+from .organization import (
+    AddDepartment,
+    ChiefOfStaffOrchestrator,
+    CreateOrganization,
+    CreateOrganizationRequest,
+    DelegateTask,
+    DelegationCandidate,
+    DelegationProposal,
+    PlaceStaff,
+    RegisterStaff,
+    RegisterStaffRequest,
+    SetChiefOfStaff,
+)
 from .use_cases import (
     AddEvidence,
     ApproveTask,
@@ -10,12 +23,23 @@ from .use_cases import (
 )
 
 __all__ = [
+    "AddDepartment",
     "AddEvidence",
     "ApproveTask",
     "AssignTask",
+    "ChiefOfStaffOrchestrator",
+    "CreateOrganization",
+    "CreateOrganizationRequest",
     "CreateTask",
     "CreateTaskRequest",
+    "DelegateTask",
+    "DelegationCandidate",
+    "DelegationProposal",
     "ExecuteTask",
+    "PlaceStaff",
     "RecordDecision",
+    "RegisterStaff",
+    "RegisterStaffRequest",
+    "SetChiefOfStaff",
     "VerifyTask",
 ]
