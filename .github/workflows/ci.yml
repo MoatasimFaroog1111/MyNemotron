@@ -1,0 +1,41 @@
+name: MyNemotron CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mynemotron-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Python quality checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install lightweight CI tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ruff
+
+      - name: Ruff
+        run: ruff check src tests
+
+      - name: Python syntax check
+        run: python -m compileall -q src
