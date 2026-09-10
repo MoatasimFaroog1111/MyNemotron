@@ -1,0 +1,38 @@
+name: Import Nemotron Source
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  import-source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout destination repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Import verified Nemotron snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          UPSTREAM_SHA="907d408c67cb70e9f1ed28fb67702e7bd36e3239"
+          git init -q /tmp/nemotron-upstream
+          git -C /tmp/nemotron-upstream remote add origin https://github.com/NVIDIA-NeMo/Nemotron.git
+          git -C /tmp/nemotron-upstream fetch --depth 1 origin "$UPSTREAM_SHA"
+          git -C /tmp/nemotron-upstream checkout -q --detach FETCH_HEAD
+          rsync -a --delete --exclude='.git' --exclude='.github/workflows/' /tmp/nemotron-upstream/ ./
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f -A
+          if git diff --cached --quiet; then
+            echo "No changes to import."
+            exit 0
+          fi
+          git commit -m "Complete verified Nemotron import"
+          git push origin HEAD:main
