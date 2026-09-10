@@ -35,10 +35,16 @@ class ExecutionReceipt:
     reference: str
     summary: str
 
+    def __post_init__(self) -> None:
+        if not self.reference.strip():
+            raise ValueError("Execution receipt reference cannot be empty.")
+        if not self.summary.strip():
+            raise ValueError("Execution receipt summary cannot be empty.")
+
 
 class ActionExecutorPort(Protocol):
-    def execute(self, task: Task) -> ExecutionReceipt:
-        """Perform an already-authorized external action and return execution evidence."""
+    def execute(self, task: Task, *, idempotency_key: str) -> ExecutionReceipt:
+        """Perform an authorized external action idempotently and return execution evidence."""
 
 
 @dataclass(frozen=True, slots=True)

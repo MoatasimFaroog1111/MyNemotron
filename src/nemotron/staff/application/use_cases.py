@@ -150,6 +150,7 @@ class ApproveTask:
         approver.assert_active()
         if task.assignee_id == approver_id:
             raise PermissionDenied("Self-approval is forbidden.")
+        approver.assert_allowed("approve", task.resource, task.risk)
         if not approver.role.can_approve(task.risk):
             raise PermissionDenied(f"Role {approver.role.name!r} cannot approve {task.risk.value} risk tasks.")
         now = self._clock.now()
@@ -188,8 +189,11 @@ class ExecuteTask:
         if task.assignee_id != actor_id:
             raise PermissionDenied("Only the assigned staff member may execute this task.")
         actor.assert_allowed(task.action, task.resource, task.risk)
+
+        # Authorization gate is checked before the external side effect.
         task.assert_ready_for_execution()
-        receipt = self._executor.execute(task)
+        receipt = self._executor.execute(task, idempotency_key=task.execution_key)
+
         updated = task.record_execution(receipt.reference)
         self._tasks.save(updated)
         self._audit.append(

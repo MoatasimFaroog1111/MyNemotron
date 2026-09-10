@@ -27,9 +27,12 @@ Low-risk tasks may skip the approval gate only when the active GovernancePolicy 
 ## Security and governance invariants
 
 - Least privilege: staff act only through explicit Role permissions scoped by action, resource, and maximum risk.
+- Assignment and approval are separate permissions.
 - No self-approval.
+- A task cannot be reassigned after the decision lifecycle starts; later delegation must be modeled explicitly so prior decisions and approvals cannot be silently inherited.
 - High and critical risk tasks require independent verification under the conservative policy.
 - External side effects are behind ActionExecutorPort and are invoked only after `Task.assert_ready_for_execution()` succeeds.
+- Every task exposes a stable execution idempotency key; external adapters must honor it to prevent duplicate writes on retries.
 - Every application use case emits an immutable AuditEvent.
 - Secrets and provider credentials do not belong in Domain or Application code.
 - Domain and Application contain no FastAPI, database, Odoo, Gmail, GitHub, LangGraph, Nemotron runtime, or vendor SDK imports.
@@ -47,4 +50,4 @@ src/nemotron/staff/
 
 ## Next layers
 
-Adapters should be added in separate packages and must implement the application Ports rather than being imported by the core. Planned areas include persistent repositories, model-backed decision workers, shared memory, tool connectors, human approval channels, task queues, and the Chief-of-Staff orchestrator.
+Adapters should be added in separate packages and must implement the application Ports rather than being imported by the core. Planned areas include persistent repositories with optimistic concurrency, transactional audit/outbox support, model-backed decision workers, shared memory, tool connectors, human approval channels, task queues, and the Chief-of-Staff orchestrator.

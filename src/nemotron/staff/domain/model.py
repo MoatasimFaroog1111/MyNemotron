@@ -210,9 +210,14 @@ class Task:
             if not value.strip():
                 raise StaffCoreError(f"{field_name} cannot be empty.")
 
+    @property
+    def execution_key(self) -> str:
+        """Stable idempotency key that external action adapters must honor."""
+        return f"staff-task:{self.task_id}:execute"
+
     def assign_to(self, staff_id: str) -> Task:
-        if self.state not in {TaskState.EVIDENCE, TaskState.AWAITING_APPROVAL, TaskState.READY_FOR_EXECUTION}:
-            raise InvalidTransition(f"Cannot assign task while it is {self.state.value}.")
+        if self.state is not TaskState.EVIDENCE:
+            raise InvalidTransition("A task cannot be reassigned after its decision lifecycle has started.")
         if not staff_id.strip():
             raise StaffCoreError("Assignee id cannot be empty.")
         return replace(self, assignee_id=staff_id)

@@ -75,9 +75,11 @@ class InMemoryAudit:
 class FakeExecutor:
     def __init__(self) -> None:
         self.calls = 0
+        self.idempotency_keys: list[str] = []
 
-    def execute(self, task: Task) -> ExecutionReceipt:
+    def execute(self, task: Task, *, idempotency_key: str) -> ExecutionReceipt:
         self.calls += 1
+        self.idempotency_keys.append(idempotency_key)
         return ExecutionReceipt(reference="external-123", summary=f"Executed {task.action}")
 
 
@@ -100,7 +102,10 @@ def make_staff() -> tuple[StaffMember, StaffMember, StaffMember]:
         Role(
             "manager",
             "Manager",
-            (Permission("assign", "erp", RiskLevel.CRITICAL),),
+            (
+                Permission("assign", "erp", RiskLevel.CRITICAL),
+                Permission("approve", "erp", RiskLevel.CRITICAL),
+            ),
             approval_limit=RiskLevel.CRITICAL,
         ),
     )
@@ -159,6 +164,13 @@ def test_high_risk_task_cannot_execute_before_approval() -> None:
     assert tasks.get("task-1").state is TaskState.AWAITING_APPROVAL
 
 
+def test_task_cannot_be_reassigned_after_decision_lifecycle_starts() -> None:
+    tasks, staff, audit, _ = build_high_risk_flow()
+
+    with pytest.raises(InvalidTransition, match="reassigned"):
+        AssignTask(tasks, staff, FixedClock(), audit)("task-1", "worker-1", "manager-1")
+
+
 def test_self_approval_is_forbidden() -> None:
     tasks, staff, audit, _ = build_high_risk_flow()
 
@@ -184,6 +196,7 @@ def test_high_risk_execution_requires_independent_verification() -> None:
     executed = ExecuteTask(tasks, staff, executor, FixedClock(), audit)("task-1", "worker-1")
     assert executed.state is TaskState.VERIFYING
     assert executor.calls == 1
+    assert executor.idempotency_keys == ["staff-task:task-1:execute"]
 
     with pytest.raises(PermissionDenied, match="Independent verification"):
         VerifyTask(tasks, staff, policy, FixedClock(), audit)(
