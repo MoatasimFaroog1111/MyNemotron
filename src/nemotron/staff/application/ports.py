@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from typing import Protocol, TypeAlias
 
 from nemotron.staff.domain.model import StaffMember, Task
+from nemotron.staff.domain.organization import Organization
 
 
 class TaskRepository(Protocol):
@@ -18,6 +19,20 @@ class TaskRepository(Protocol):
 class StaffRepository(Protocol):
     def get(self, staff_id: str) -> StaffMember:
         """Return a staff member or raise LookupError."""
+
+    def save(self, member: StaffMember) -> None:
+        """Create or replace one staff registry member."""
+
+    def list_all(self) -> tuple[StaffMember, ...]:
+        """Return the complete staff registry snapshot."""
+
+
+class OrganizationRepository(Protocol):
+    def get(self, organization_id: str) -> Organization:
+        """Return an organization or raise LookupError."""
+
+    def save(self, organization: Organization) -> None:
+        """Persist the complete organization aggregate."""
 
 
 class ClockPort(Protocol):
@@ -56,6 +71,19 @@ class AuditEvent:
     detail: str
 
 
+@dataclass(frozen=True, slots=True)
+class GovernanceAuditEvent:
+    event_type: str
+    subject_type: str
+    subject_id: str
+    actor_id: str
+    occurred_at: datetime
+    detail: str
+
+
+AuditRecord: TypeAlias = AuditEvent | GovernanceAuditEvent
+
+
 class AuditPort(Protocol):
-    def append(self, event: AuditEvent) -> None:
-        """Append an immutable audit event."""
+    def append(self, event: AuditRecord) -> None:
+        """Append an immutable audit record."""
