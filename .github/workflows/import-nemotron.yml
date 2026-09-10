@@ -21,7 +21,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          UPSTREAM_SHA="95131c963db584181468cc4cca8a7a9160006b7b"
+          UPSTREAM_SHA="907d408c67cb70e9f1ed28fb67702e7bd36e3239"
           git init -q /tmp/nemotron-upstream
           git -C /tmp/nemotron-upstream remote add origin https://github.com/NVIDIA-NeMo/Nemotron.git
           git -C /tmp/nemotron-upstream fetch --depth 1 origin "$UPSTREAM_SHA"
