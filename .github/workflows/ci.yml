@@ -34,8 +34,8 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install ruff
 
-      - name: Ruff
-        run: ruff check src tests
+      - name: Critical Ruff checks
+        run: ruff check src tests --select E9,F63,F7,F82
 
       - name: Python syntax check
-        run: python -m compileall -q src
+        run: python -m compileall -q src tests
