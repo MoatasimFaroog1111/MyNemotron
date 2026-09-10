@@ -26,7 +26,7 @@ jobs:
           git -C /tmp/nemotron-upstream remote add origin https://github.com/NVIDIA-NeMo/Nemotron.git
           git -C /tmp/nemotron-upstream fetch --depth 1 origin "$UPSTREAM_SHA"
           git -C /tmp/nemotron-upstream checkout -q --detach FETCH_HEAD
-          rsync -a --delete --exclude='.git' /tmp/nemotron-upstream/ ./
+          rsync -a --delete --exclude='.git' --exclude='.github/workflows/' /tmp/nemotron-upstream/ ./
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
@@ -34,5 +34,5 @@ jobs:
             echo "No changes to import."
             exit 0
           fi
-          git commit -m "Import Nemotron source"
+          git commit -m "Import Nemotron source excluding workflow files"
           git push origin HEAD:main
