@@ -31,6 +31,7 @@ class SQLiteTaskRepository:
         return connection
 
     def _initialize(self) -> None:
+        Path(self.path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as db:
             db.execute(
                 """CREATE TABLE IF NOT EXISTS staff_core_tasks (
@@ -168,3 +169,12 @@ class SQLiteTaskRepository:
                 ON CONFLICT(task_id) DO UPDATE SET payload_json = excluded.payload_json""",
                 (task.task_id, self._serialize(task)),
             )
+
+    def list_all(self) -> tuple[Task, ...]:
+        with self._connect() as db:
+            rows = db.execute("SELECT payload_json FROM staff_core_tasks ORDER BY task_id").fetchall()
+        return tuple(self._deserialize(row["payload_json"]) for row in rows)
+
+    def list_by_state(self, *states: TaskState) -> tuple[Task, ...]:
+        allowed = set(states)
+        return tuple(task for task in self.list_all() if task.state in allowed)
