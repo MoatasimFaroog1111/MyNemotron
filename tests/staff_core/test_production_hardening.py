@@ -57,7 +57,7 @@ def test_nemotron_readiness_fails_closed_without_key() -> None:
 def test_github_read_only_definition_has_no_mutations() -> None:
     definition = github_tool_definition(read_only=True)
     operations = {item.name: item for item in definition.operations}
-    assert set(operations) == {"get_repository", "get_issue"}
+    assert set(operations) == {"get_repository", "get_issue", "get_file"}
     assert all(item.mutating is False for item in operations.values())
     GitHubToolConfig(None, ("owner/repo",), read_only=True)
     with pytest.raises(ValueError):
