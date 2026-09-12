@@ -25,7 +25,7 @@ from .base import GuardedToolAdapter
 class GitHubToolConfig:
     token: str | None
     allowed_repositories: tuple[str, ...]
-    read_only: bool = True
+    read_only: bool = False
     api_base: str = "https://api.github.com"
 
     def __post_init__(self) -> None:
