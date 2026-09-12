@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 import secrets
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from nemotron.staff.application.tool_ports import ToolInvocationError
 from nemotron.staff.domain import InvalidTransition, PermissionDenied, StaffCoreError
@@ -14,9 +16,17 @@ from nemotron.staff.domain.tools import ToolGatewayError
 
 from .security import SlidingWindowRateLimiter
 from .service import ControlPlaneService
+from .ui_session import UISessionManager
 
 
 _MAX_BODY_BYTES = 1_000_000
+_UI_ASSETS = {
+    "/ui/": "index.html",
+    "/ui/index.html": "index.html",
+    "/ui/app.css": "app.css",
+    "/ui/app.js": "app.js",
+    "/ui/team-original.jpg": "team-original.jpg",
+}
 
 
 class ControlPlaneHTTPServer(ThreadingHTTPServer):
@@ -27,6 +37,8 @@ class ControlPlaneHTTPServer(ThreadingHTTPServer):
         self.service = service
         self.api_token = api_token
         self.rate_limiter = SlidingWindowRateLimiter()
+        self.ui_sessions = UISessionManager(service.runtime.config.capability_secret)
+        self.frontend_root = Path(__file__).with_name("frontend")
 
 
 class ControlPlaneRequestHandler(BaseHTTPRequestHandler):
@@ -41,6 +53,15 @@ class ControlPlaneRequestHandler(BaseHTTPRequestHandler):
     def _config(self):  # type: ignore[no-untyped-def]
         return self.server.service.runtime.config
 
+    def _security_headers(self) -> None:
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+        if self._config.require_forwarded_https:
+            self.send_header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+
     def _write_json(
         self,
         status: HTTPStatus,
@@ -53,16 +74,44 @@ class ControlPlaneRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
-        self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        self._security_headers()
         self.send_header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
         if extra_headers:
             for key, value in extra_headers.items():
                 self.send_header(key, value)
         self.end_headers()
         self.wfile.write(body)
+
+    def _write_bytes(
+        self,
+        status: HTTPStatus,
+        body: bytes,
+        *,
+        content_type: str,
+        cache_control: str = "no-store",
+        content_security_policy: str | None = None,
+        extra_headers: dict[str, str] | None = None,
+    ) -> None:
+        self.send_response(status.value)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", cache_control)
+        self._security_headers()
+        if content_security_policy:
+            self.send_header("Content-Security-Policy", content_security_policy)
+        if extra_headers:
+            for key, value in extra_headers.items():
+                self.send_header(key, value)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _redirect(self, location: str) -> None:
+        self.send_response(HTTPStatus.FOUND.value)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.send_header("Cache-Control", "no-store")
+        self._security_headers()
+        self.end_headers()
 
     def _client_key(self) -> str:
         return str(self.client_address[0])
@@ -99,18 +148,46 @@ class ControlPlaneRequestHandler(BaseHTTPRequestHandler):
         supplied = header[len(prefix) :]
         return secrets.compare_digest(supplied, self.server.api_token)
 
-    def _require_auth(self) -> bool:
+    def _request_origin_allowed(self) -> bool:
+        origin = self.headers.get("Origin")
+        if not origin:
+            return True
+        parsed = urlparse(origin)
+        if parsed.scheme not in {"http", "https"}:
+            return False
+        request_host = self.headers.get("Host", "").strip().lower()
+        return parsed.netloc.lower() == request_host
+
+    def _require_transport(self) -> bool:
         if not self._host_allowed():
             self._write_json(HTTPStatus.BAD_REQUEST, {"error": "invalid_host"})
             return False
         if not self._transport_allowed():
             self._write_json(HTTPStatus.UPGRADE_REQUIRED, {"error": "https_required"})
             return False
+        return True
+
+    def _require_auth(self) -> bool:
+        if not self._require_transport():
+            return False
         if self._authorized():
             return True
         if not self._rate_limit("auth-failure", limit=self._config.api_auth_failure_rpm):
             return False
         self._write_json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
+        return False
+
+    def _ui_authorized(self) -> bool:
+        return self.server.ui_sessions.session_from_headers(self.headers) is not None
+
+    def _require_ui_auth(self) -> bool:
+        if not self._require_transport():
+            return False
+        if self._ui_authorized():
+            return True
+        if not self._rate_limit("ui-auth-failure", limit=self._config.api_auth_failure_rpm):
+            return False
+        self._write_json(HTTPStatus.UNAUTHORIZED, {"error": "ui_session_required"})
         return False
 
     def _read_json(self) -> dict[str, Any]:
@@ -146,9 +223,48 @@ class ControlPlaneRequestHandler(BaseHTTPRequestHandler):
         else:
             self._write_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "internal_error"})
 
+    def _serve_ui_asset(self, path: str) -> bool:
+        filename = _UI_ASSETS.get(path)
+        if filename is None:
+            return False
+        asset = self.server.frontend_root / filename
+        if not asset.is_file():
+            self._write_json(HTTPStatus.NOT_FOUND, {"error": "ui_asset_missing"})
+            return True
+        body = asset.read_bytes()
+        content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        if filename.endswith(".html"):
+            csp = (
+                "default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'; "
+                "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+            )
+            cache = "no-store"
+        elif filename.endswith((".js", ".css")):
+            csp = None
+            cache = "no-cache"
+        else:
+            csp = None
+            cache = "public, max-age=86400"
+        self._write_bytes(
+            HTTPStatus.OK,
+            body,
+            content_type=content_type,
+            cache_control=cache,
+            content_security_policy=csp,
+        )
+        return True
+
     def do_GET(self) -> None:  # noqa: N802
         try:
             parsed = urlparse(self.path)
+            if parsed.path == "/":
+                self._redirect("/ui/")
+                return
+            if parsed.path == "/ui":
+                self._redirect("/ui/")
+                return
+            if self._serve_ui_asset(parsed.path):
+                return
             if parsed.path == "/health":
                 health = self.server.service.health()
                 status = HTTPStatus.OK if health.get("ready") else HTTPStatus.SERVICE_UNAVAILABLE
@@ -159,6 +275,30 @@ class ControlPlaneRequestHandler(BaseHTTPRequestHandler):
                 status = HTTPStatus.OK if readiness.get("ready") else HTTPStatus.SERVICE_UNAVAILABLE
                 self._write_json(status, {"status": readiness.get("status"), "ready": readiness.get("ready")})
                 return
+
+            if parsed.path.startswith("/ui/api/"):
+                if not self._require_ui_auth():
+                    return
+                if not self._rate_limit("ui-read", limit=self._config.api_read_rpm):
+                    return
+                if parsed.path == "/ui/api/session":
+                    self._write_json(HTTPStatus.OK, {"authenticated": True})
+                    return
+                if parsed.path == "/ui/api/staff":
+                    self._write_json(HTTPStatus.OK, {"items": self.server.service.staff_directory()})
+                    return
+                if parsed.path.startswith("/ui/api/staff/") and parsed.path.endswith("/workspace"):
+                    staff_id = unquote(parsed.path[len("/ui/api/staff/") : -len("/workspace")].strip("/"))
+                    if not staff_id or "/" in staff_id:
+                        raise ValueError("Invalid staff id.")
+                    self._write_json(HTTPStatus.OK, self.server.service.staff_workspace(staff_id))
+                    return
+                if parsed.path == "/ui/api/overview":
+                    self._write_json(HTTPStatus.OK, self.server.service.ui_overview())
+                    return
+                self._write_json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
+                return
+
             if not self._require_auth():
                 return
             if not self._rate_limit("read", limit=self._config.api_read_rpm):
@@ -206,12 +346,42 @@ class ControlPlaneRequestHandler(BaseHTTPRequestHandler):
             self._handle_error(exc)
 
     def do_POST(self) -> None:  # noqa: N802
-        if not self._require_auth():
-            return
-        if not self._rate_limit("write", limit=self._config.api_write_rpm):
-            return
         try:
             parsed = urlparse(self.path)
+            if parsed.path == "/ui/login":
+                if not self._require_transport():
+                    return
+                if not self._request_origin_allowed():
+                    self._write_json(HTTPStatus.FORBIDDEN, {"error": "origin_rejected"})
+                    return
+                if not self._rate_limit("ui-login", limit=self._config.api_auth_failure_rpm):
+                    return
+                payload = self._read_json()
+                token = str(payload.get("token", ""))
+                if not token or not secrets.compare_digest(token, self.server.api_token):
+                    self._write_json(HTTPStatus.UNAUTHORIZED, {"error": "invalid_credentials"})
+                    return
+                session_token = self.server.ui_sessions.issue()
+                self._write_json(
+                    HTTPStatus.OK,
+                    {"authenticated": True},
+                    extra_headers={"Set-Cookie": self.server.ui_sessions.set_cookie_header(session_token)},
+                )
+                return
+            if parsed.path == "/ui/logout":
+                if not self._require_transport():
+                    return
+                self._write_json(
+                    HTTPStatus.OK,
+                    {"authenticated": False},
+                    extra_headers={"Set-Cookie": self.server.ui_sessions.clear_cookie_header()},
+                )
+                return
+
+            if not self._require_auth():
+                return
+            if not self._rate_limit("write", limit=self._config.api_write_rpm):
+                return
             payload = self._read_json()
             if parsed.path == "/api/v1/backups":
                 result = self.server.service.create_backup(
