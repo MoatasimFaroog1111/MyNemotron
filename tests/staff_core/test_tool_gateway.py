@@ -37,10 +37,10 @@ from nemotron.staff.domain.tools import (
     CapabilityToken,
     ToolCategory,
     ToolDefinition,
-    ToolExecutionIntent,
     ToolExecutionReceipt,
     ToolGatewayError,
     ToolOperation,
+    arguments_digest,
 )
 
 
@@ -268,9 +268,10 @@ def test_hmac_capability_rejects_tampering_and_expiry() -> None:
     authority = HMACCapabilityAuthority(b"b" * 32)
     claims = CapabilityClaims("t", "s", "files", "read_text", "a" * 64, "key", NOW, NOW + timedelta(seconds=10))
     token = authority.issue(claims)
-    tampered = CapabilityToken(token.value[:-1] + ("A" if token.value[-1] != "A" else "B"))
-    with pytest.raises(ToolGatewayError, match="signature|base64"):
-        authority.verify(tampered, now=NOW)
+    payload, signature = token.value.split(".", 1)
+    tampered_payload = ("A" if payload[0] != "A" else "B") + payload[1:]
+    with pytest.raises(ToolGatewayError):
+        authority.verify(CapabilityToken(f"{tampered_payload}.{signature}"), now=NOW)
     with pytest.raises(ToolGatewayError, match="expired"):
         authority.verify(token, now=NOW + timedelta(seconds=11))
 
@@ -287,8 +288,7 @@ def test_files_adapter_refuses_direct_invalid_capability_and_path_escape(tmp_pat
         )
 
     arguments = {"path": "../outside.txt"}
-    from nemotron.staff.domain.tools import arguments_digest
-
+    issued = datetime.now(timezone.utc) - timedelta(seconds=1)
     claims = CapabilityClaims(
         "task-files",
         "worker",
@@ -296,8 +296,8 @@ def test_files_adapter_refuses_direct_invalid_capability_and_path_escape(tmp_pat
         "read_text",
         arguments_digest(arguments),
         "file-key",
-        NOW,
-        NOW + timedelta(seconds=30),
+        issued,
+        issued + timedelta(seconds=30),
     )
     token = authority.issue(claims)
     with pytest.raises(ToolGatewayError, match="escapes"):
