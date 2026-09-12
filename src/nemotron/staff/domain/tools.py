@@ -190,10 +190,35 @@ class ToolExecutionReceipt:
     operation: str
     reference: str
     summary: str
+    output_json: str | None = None
 
     def __post_init__(self) -> None:
         if any(not value.strip() for value in (self.tool_id, self.operation, self.reference, self.summary)):
             raise ToolGatewayError("Tool execution receipt fields cannot be empty.")
+        if self.output_json is not None:
+            try:
+                json.loads(self.output_json)
+            except json.JSONDecodeError as exc:
+                raise ToolGatewayError("Tool execution receipt output_json must contain valid JSON.") from exc
+
+    @classmethod
+    def with_output(
+        cls,
+        *,
+        tool_id: str,
+        operation: str,
+        reference: str,
+        summary: str,
+        output: Any,
+    ) -> ToolExecutionReceipt:
+        try:
+            encoded = json.dumps(output, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        except (TypeError, ValueError) as exc:
+            raise ToolGatewayError("Tool execution output must be JSON serializable.") from exc
+        return cls(tool_id, operation, reference, summary, encoded)
+
+    def output(self) -> Any:
+        return None if self.output_json is None else json.loads(self.output_json)
 
 
 class IdempotencyState(str, Enum):
