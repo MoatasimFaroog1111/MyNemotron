@@ -10,12 +10,12 @@ WORKDIR /app
 # runtime package instead of installing the full Nemotron training stack.
 COPY src/nemotron /app/src/nemotron
 
+# Use a numeric unprivileged identity so the image does not depend on
+# distribution-specific user-management utilities being installed.
 RUN mkdir -p /data/staff /data/files \
-    && addgroup --system staffcp \
-    && adduser --system --ingroup staffcp staffcp \
-    && chown -R staffcp:staffcp /data /app
+    && chown -R 65532:65532 /data /app
 
-USER staffcp
+USER 65532:65532
 
 EXPOSE 8088
 
