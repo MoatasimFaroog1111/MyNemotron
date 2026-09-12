@@ -60,6 +60,13 @@ class PrepareToolExecutionRequest:
     arguments: Mapping[str, Any]
 
 
+@dataclass(frozen=True, slots=True)
+class GatewayExecutionResult:
+    task: Task
+    receipt: ToolExecutionReceipt
+    recovered: bool = False
+
+
 class PrepareToolExecution:
     """Freeze a concrete tool invocation before approval/execution."""
 
@@ -184,7 +191,7 @@ class ExecuteToolTask:
             and actual.idempotency_key == expected.idempotency_key
         )
 
-    def __call__(self, task_id: str, actor_id: str) -> Task:
+    def __call__(self, task_id: str, actor_id: str) -> GatewayExecutionResult:
         task = self._tasks.get(task_id)
         intent = self._intents.get(task_id)
         self._validate(task, actor_id, intent)
@@ -211,7 +218,7 @@ class ExecuteToolTask:
                     existing.receipt.reference,
                 )
             )
-            return updated
+            return GatewayExecutionResult(updated, existing.receipt, True)
 
         now = self._clock.now()
         claims = CapabilityClaims(
@@ -277,4 +284,4 @@ class ExecuteToolTask:
                 f"{receipt.reference}: {receipt.summary}",
             )
         )
-        return updated
+        return GatewayExecutionResult(updated, receipt, False)
