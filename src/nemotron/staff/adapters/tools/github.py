@@ -5,6 +5,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 from typing import Any, Mapping
 
 from nemotron.staff.application.tool_ports import CapabilityAuthorityPort, ToolInvocationError
@@ -27,6 +28,7 @@ class GitHubToolConfig:
     allowed_repositories: tuple[str, ...]
     read_only: bool = False
     api_base: str = "https://api.github.com"
+    raw_base: str = "https://raw.githubusercontent.com"
 
     def __post_init__(self) -> None:
         if not self.allowed_repositories:
@@ -39,6 +41,7 @@ def github_tool_definition(tool_id: str = "github", *, read_only: bool = False) 
     operations = [
         ToolOperation("get_repository", ("read",), RiskLevel.LOW, False),
         ToolOperation("get_issue", ("read",), RiskLevel.LOW, False),
+        ToolOperation("get_file", ("read",), RiskLevel.LOW, False),
     ]
     if not read_only:
         operations.extend(
@@ -56,6 +59,8 @@ def github_tool_definition(tool_id: str = "github", *, read_only: bool = False) 
 
 
 class GitHubToolAdapter(GuardedToolAdapter):
+    _MAX_RAW_BYTES = 131_072
+
     def __init__(
         self,
         config: GitHubToolConfig,
@@ -111,6 +116,48 @@ class GitHubToolAdapter(GuardedToolAdapter):
             raise ToolInvocationError("GitHub returned an unexpected response shape.", side_effect_started=mutating)
         return value
 
+    @staticmethod
+    def _safe_raw_path(value: str) -> tuple[str, tuple[str, ...]]:
+        raw = value.strip().replace("\\", "/")
+        path = PurePosixPath(raw)
+        if not raw or path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
+            raise ToolGatewayError("GitHub file path is invalid.")
+        return raw, path.parts
+
+    def _read_raw_file(self, owner: str, repo: str, *, ref: str, path: str) -> tuple[str, bytes]:
+        ref = ref.strip()
+        if not ref or len(ref) > 128 or any(char.isspace() for char in ref):
+            raise ToolGatewayError("GitHub file ref is invalid.")
+        raw_path, parts = self._safe_raw_path(path)
+        encoded_path = "/".join(urllib.parse.quote(part, safe="") for part in parts)
+        url = (
+            self._config.raw_base.rstrip("/")
+            + "/"
+            + urllib.parse.quote(owner, safe="")
+            + "/"
+            + urllib.parse.quote(repo, safe="")
+            + "/"
+            + urllib.parse.quote(ref, safe="")
+            + "/"
+            + encoded_path
+        )
+        request = urllib.request.Request(
+            url,
+            headers={"User-Agent": "MyNemotron-Staff-Gateway", "Accept": "text/plain,*/*;q=0.8"},
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                body = response.read(self._MAX_RAW_BYTES + 1)
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as exc:
+            raise ToolInvocationError(
+                f"GitHub raw file read failed: {type(exc).__name__}",
+                side_effect_started=False,
+            ) from exc
+        if len(body) > self._MAX_RAW_BYTES:
+            raise ToolInvocationError("GitHub raw file exceeds the configured read limit.", side_effect_started=False)
+        return raw_path, body
+
     def execute(
         self,
         operation: str,
@@ -129,6 +176,24 @@ class GitHubToolAdapter(GuardedToolAdapter):
         escaped_owner = urllib.parse.quote(owner, safe="")
         escaped_repo = urllib.parse.quote(repo, safe="")
         base = f"/repos/{escaped_owner}/{escaped_repo}"
+
+        if operation == "get_file":
+            ref = str(arguments.get("ref", "main"))
+            path, body = self._read_raw_file(owner, repo, ref=ref, path=str(arguments.get("path", "")))
+            reference = f"https://github.com/{owner}/{repo}/blob/{ref}/{path}"
+            return ToolExecutionReceipt.with_output(
+                tool_id=self.tool_id,
+                operation=operation,
+                reference=reference,
+                summary=f"Read GitHub file {full}@{ref}:{path}",
+                output={
+                    "full_name": full,
+                    "ref": ref,
+                    "path": path,
+                    "bytes": len(body),
+                    "content": body.decode("utf-8", errors="replace"),
+                },
+            )
 
         if operation == "get_repository":
             result = self._request("GET", base, payload=None, mutating=False, idempotency_key=idempotency_key)

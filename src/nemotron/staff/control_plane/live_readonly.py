@@ -28,7 +28,8 @@ class ReadOnlyResult:
     operation: str
     execution_reference: str
     repository: str
-    default_branch: str | None
+    path: str
+    bytes_read: int
     audit_events: int
 
 
@@ -104,6 +105,8 @@ def run_read_only_github(
     runtime: ProductionRuntime,
     *,
     repository: str,
+    ref: str = "main",
+    path: str = "README.md",
     prefix: str = "readonly",
 ) -> ReadOnlyResult:
     owner, separator, repo = repository.partition("/")
@@ -113,9 +116,9 @@ def run_read_only_github(
     goal = runtime.create_goal(
         CreateGoalRequest(
             organization_id=ids["organization"],
-            title="Read public GitHub repository metadata",
+            title="Read a public GitHub file",
             description=(
-                "Create exactly one plan step that reads GitHub repository metadata. "
+                f"Create exactly one plan step that reads {path} from {repository}@{ref}. "
                 "The step must use action 'read', resource 'github', risk 'low', "
                 "and the Research department. It must not write, comment, create, edit, or delete anything."
             ),
@@ -128,8 +131,11 @@ def run_read_only_github(
         ids["organization"],
         ids["chief"],
         scope=MemoryScope.ORGANIZATION,
-        content=f"Read repository metadata only for {repository}. No external mutation is authorized.",
-        source_reference=f"readonly://github/{repository}",
+        content=(
+            f"Read only {path} from GitHub repository {repository} at ref {ref}. "
+            "No external mutation is authorized."
+        ),
+        source_reference=f"readonly://github/{repository}/{ref}/{path}",
     )
     proposal = runtime.build_plan(goal.goal_id, ids["chief"])
     if len(proposal.steps) != 1:
@@ -156,22 +162,25 @@ def run_read_only_github(
             task_id=task_id,
             actor_id=ids["worker"],
             tool_id="github",
-            operation="get_repository",
-            arguments={"owner": owner, "repo": repo},
+            operation="get_file",
+            arguments={"owner": owner, "repo": repo, "ref": ref, "path": path},
         )
     )
     execution = runtime.execute_tool_task(task_id, ids["worker"])
     if execution.task.state is not TaskState.VERIFYING:
         raise AssertionError("Read-only GitHub execution did not enter verification.")
     output = execution.receipt.output()
-    if output.get("full_name") != repository:
-        raise AssertionError("GitHub read returned an unexpected repository.")
+    if output.get("full_name") != repository or output.get("path") != path:
+        raise AssertionError("GitHub read returned an unexpected repository or path.")
+    bytes_read = int(output.get("bytes") or 0)
+    if bytes_read <= 0 or not str(output.get("content") or "").strip():
+        raise AssertionError("GitHub read returned empty content.")
 
     final = runtime.verify_task(
         task_id,
         ids["verifier"],
         passed=True,
-        summary="Verified read-only GitHub metadata receipt; no mutation operation was authorized.",
+        summary="Verified read-only GitHub file receipt; no mutation operation was registered or authorized.",
     )
     if final.state is not TaskState.COMPLETED:
         raise AssertionError("Read-only task did not complete.")
@@ -186,7 +195,8 @@ def run_read_only_github(
         operation=execution.receipt.operation,
         execution_reference=execution.receipt.reference,
         repository=repository,
-        default_branch=output.get("default_branch"),
+        path=path,
+        bytes_read=bytes_read,
         audit_events=len(timeline),
     )
 
@@ -216,7 +226,7 @@ def main() -> int:
         )
         runtime = build_production_runtime(config)
         result = run_read_only_github(runtime, repository=repository, prefix="live-ro")
-        print(json.dumps(asdict(result), ensure_ascii=False, indent=2))
+        print(json.dumps(asdict(result), ensure_ascii=False, indent=2), flush=True)
     return 0
 
 
