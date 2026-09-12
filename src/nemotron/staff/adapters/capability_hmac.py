@@ -4,7 +4,7 @@ import base64
 import hashlib
 import hmac
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from nemotron.staff.application.tool_ports import CapabilityAuthorityPort
 from nemotron.staff.domain.tools import CapabilityClaims, CapabilityToken, ToolGatewayError
@@ -72,6 +72,6 @@ class HMACCapabilityAuthority(CapabilityAuthorityPort):
         instant = now if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
         if instant >= claims.expires_at:
             raise ToolGatewayError("Capability token has expired.")
-        if instant < claims.issued_at - __import__("datetime").timedelta(seconds=5):
+        if instant < claims.issued_at - timedelta(seconds=5):
             raise ToolGatewayError("Capability token is not valid yet.")
         return claims
