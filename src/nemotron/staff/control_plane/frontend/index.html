@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>فريق العمل التفاعلي | MyNemotron</title>
+  <link rel="stylesheet" href="/ui/app.css">
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand"><span class="logo" aria-hidden="true">◎</span><span>فريق العمل التفاعلي</span></div>
+    <div class="tools">
+      <button class="tool dashboard" id="overviewBtn" type="button">لوحة التحكم</button>
+      <button class="tool" id="minus" aria-label="تصغير" type="button">−</button>
+      <span id="zoomText">100%</span>
+      <button class="tool" id="plus" aria-label="تكبير" type="button">+</button>
+      <button class="tool" id="fit" aria-label="إعادة الحجم" type="button">ملاءمة</button>
+      <button class="tool logout" id="logout" type="button">خروج</button>
+    </div>
+  </header>
+  <main>
+    <div class="stage" id="stage">
+      <img src="/ui/team-original.jpg" width="1080" height="832" alt="فريق من الموظفين في غرفة عمليات أمام خريطة عالمية" id="teamImage">
+    </div>
+  </main>
+</div>
+<div class="hint"><strong>طريقة الاستخدام:</strong> اضغط على أي موظف لفتح مساحة عمله الحقيقية في MyNemotron.</div>
+
+<div class="drawer" id="drawer" aria-hidden="true">
+  <section class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="employeeName">
+    <div class="drawer-head">
+      <div><strong id="employeeName">الموظف</strong><small id="employeeRole"></small></div>
+      <button class="close" id="close" aria-label="إغلاق" type="button">×</button>
+    </div>
+    <div class="workspace" id="workspaceBody"></div>
+  </section>
+</div>
+
+<div class="login" id="login" aria-hidden="true">
+  <form class="login-card" id="loginForm">
+    <div class="logo login-logo" aria-hidden="true">◎</div>
+    <h1>MyNemotron Staff OS</h1>
+    <p>أدخل مفتاح الوصول إلى Control Plane مرة واحدة. لن يُحفظ المفتاح في JavaScript أو Local Storage؛ الخادم سيستبدله بجلسة HttpOnly آمنة.</p>
+    <label for="accessToken">مفتاح الوصول</label>
+    <input id="accessToken" name="accessToken" type="password" autocomplete="current-password" required>
+    <button class="primary login-submit" type="submit">دخول</button>
+    <div class="error login-error" id="loginError"></div>
+  </form>
+</div>
+<script src="/ui/app.js" defer></script>
+</body>
+</html>
