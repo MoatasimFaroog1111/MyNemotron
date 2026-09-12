@@ -23,32 +23,46 @@ from .base import GuardedToolAdapter
 
 @dataclass(frozen=True, slots=True)
 class GitHubToolConfig:
-    token: str
+    token: str | None
     allowed_repositories: tuple[str, ...]
+    read_only: bool = True
     api_base: str = "https://api.github.com"
 
     def __post_init__(self) -> None:
-        if not self.token.strip():
-            raise ValueError("GitHub token is required at runtime.")
         if not self.allowed_repositories:
             raise ValueError("At least one GitHub repository must be allowlisted.")
+        if not self.read_only and not (self.token or "").strip():
+            raise ValueError("GitHub token is required when write operations are enabled.")
 
 
-def github_tool_definition(tool_id: str = "github") -> ToolDefinition:
+def github_tool_definition(tool_id: str = "github", *, read_only: bool = False) -> ToolDefinition:
+    operations = [
+        ToolOperation("get_repository", ("read",), RiskLevel.LOW, False),
+        ToolOperation("get_issue", ("read",), RiskLevel.LOW, False),
+    ]
+    if not read_only:
+        operations.extend(
+            [
+                ToolOperation("create_issue", ("write",), RiskLevel.MEDIUM, True),
+                ToolOperation("comment_issue", ("write",), RiskLevel.MEDIUM, True),
+            ]
+        )
     return ToolDefinition(
         tool_id=tool_id,
         category=ToolCategory.GITHUB,
         resource="github",
-        operations=(
-            ToolOperation("get_issue", ("read",), RiskLevel.LOW, False),
-            ToolOperation("create_issue", ("write",), RiskLevel.MEDIUM, True),
-            ToolOperation("comment_issue", ("write",), RiskLevel.MEDIUM, True),
-        ),
+        operations=tuple(operations),
     )
 
 
 class GitHubToolAdapter(GuardedToolAdapter):
-    def __init__(self, config: GitHubToolConfig, capabilities: CapabilityAuthorityPort, *, tool_id: str = "github") -> None:
+    def __init__(
+        self,
+        config: GitHubToolConfig,
+        capabilities: CapabilityAuthorityPort,
+        *,
+        tool_id: str = "github",
+    ) -> None:
         super().__init__(tool_id, capabilities)
         self._config = config
         self._allowed = frozenset(config.allowed_repositories)
@@ -70,15 +84,18 @@ class GitHubToolAdapter(GuardedToolAdapter):
         mutating: bool,
         idempotency_key: str,
     ) -> dict[str, Any]:
+        if mutating and (self._config.read_only or not (self._config.token or "").strip()):
+            raise ToolGatewayError("GitHub adapter is configured read-only.")
         url = self._config.api_base.rstrip("/") + path
         data = None if payload is None else json.dumps(dict(payload), ensure_ascii=False).encode("utf-8")
         headers = {
             "Accept": "application/vnd.github+json",
-            "Authorization": f"Bearer {self._config.token}",
             "X-GitHub-Api-Version": "2022-11-28",
             "User-Agent": "MyNemotron-Staff-Gateway",
             "Idempotency-Key": idempotency_key,
         }
+        if self._config.token:
+            headers["Authorization"] = f"Bearer {self._config.token}"
         if data is not None:
             headers["Content-Type"] = "application/json"
         request = urllib.request.Request(url, data=data, headers=headers, method=method)
@@ -113,15 +130,44 @@ class GitHubToolAdapter(GuardedToolAdapter):
         escaped_repo = urllib.parse.quote(repo, safe="")
         base = f"/repos/{escaped_owner}/{escaped_repo}"
 
+        if operation == "get_repository":
+            result = self._request("GET", base, payload=None, mutating=False, idempotency_key=idempotency_key)
+            return ToolExecutionReceipt.with_output(
+                tool_id=self.tool_id,
+                operation=operation,
+                reference=str(result.get("html_url") or full),
+                summary=f"Read GitHub repository metadata for {full}",
+                output={
+                    "name": result.get("name"),
+                    "full_name": result.get("full_name"),
+                    "private": result.get("private"),
+                    "default_branch": result.get("default_branch"),
+                    "open_issues_count": result.get("open_issues_count"),
+                    "updated_at": result.get("updated_at"),
+                    "html_url": result.get("html_url"),
+                },
+            )
+
         if operation == "get_issue":
             number = int(arguments["issue_number"])
-            result = self._request("GET", f"{base}/issues/{number}", payload=None, mutating=False, idempotency_key=idempotency_key)
+            result = self._request(
+                "GET",
+                f"{base}/issues/{number}",
+                payload=None,
+                mutating=False,
+                idempotency_key=idempotency_key,
+            )
             return ToolExecutionReceipt.with_output(
                 tool_id=self.tool_id,
                 operation=operation,
                 reference=str(result.get("html_url") or f"{full}#{number}"),
                 summary=f"Read GitHub issue {full}#{number}",
-                output={"number": result.get("number"), "title": result.get("title"), "state": result.get("state"), "body": result.get("body")},
+                output={
+                    "number": result.get("number"),
+                    "title": result.get("title"),
+                    "state": result.get("state"),
+                    "body": result.get("body"),
+                },
             )
 
         if operation == "create_issue":
