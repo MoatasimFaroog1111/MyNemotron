@@ -39,7 +39,7 @@ def odoo_tool_definition(tool_id: str = "odoo") -> ToolDefinition:
     return ToolDefinition(
         tool_id=tool_id,
         category=ToolCategory.ERP,
-        resource="odoo",
+        resource="erp",
         operations=(
             ToolOperation("read_records", ("read",), RiskLevel.LOW, False),
             ToolOperation("create_record", ("write", "create"), RiskLevel.HIGH, True),
