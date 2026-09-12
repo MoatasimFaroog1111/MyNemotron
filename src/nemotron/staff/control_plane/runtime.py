@@ -55,8 +55,10 @@ from nemotron.staff.application.worker import StaffWorkerEngine
 from nemotron.staff.application.worker_ports import WorkerReasoningPort
 from nemotron.staff.domain import GovernancePolicy
 
+from .backup import SQLiteBackupManager
 from .config import ControlPlaneConfig
 from .queries import ControlPlaneQueries
+from .readiness import NemotronReadinessProbe
 
 
 class UtcClock:
@@ -103,6 +105,8 @@ class ProductionRuntime:
     execute_tool_task: ExecuteToolTask
     verify_task: VerifyTask
     queries: ControlPlaneQueries
+    backups: SQLiteBackupManager
+    nemotron_readiness: NemotronReadinessProbe
     registered_tools: tuple[str, ...]
 
     def health(self) -> dict[str, object]:
@@ -114,18 +118,38 @@ class ProductionRuntime:
         except sqlite3.Error:
             database_ok = False
         files_ok = self.config.files_root.exists() and os.access(self.config.files_root, os.R_OK | os.W_OK)
-        ready = database_ok and files_ok and "files" in self.registered_tools
+        backups_ok = self.config.backup_dir.exists() and os.access(self.config.backup_dir, os.R_OK | os.W_OK)
+        mount = self.config.volume_mount_path
+        persistent_volume = bool(mount and mount.exists() and self.config.data_dir.is_relative_to(mount))
+        ready = database_ok and files_ok and backups_ok and "files" in self.registered_tools
         return {
             "status": "ready" if ready else "degraded",
             "ready": ready,
             "database": database_ok,
             "files_root": files_ok,
+            "backup_storage": backups_ok,
+            "persistent_volume": persistent_volume,
             "nemotron": {
-                "base_url": self.config.nemotron_base_url,
                 "model": self.config.nemotron_model,
                 "api_key_configured": bool(self.config.nemotron_api_key),
             },
             "registered_tools": list(self.registered_tools),
+        }
+
+    def readiness(self, *, force: bool = False) -> dict[str, object]:
+        local = self.health()
+        probe = self.nemotron_readiness.check(force=force)
+        ready = bool(local["ready"]) and probe.ready
+        return {
+            "status": "ready" if ready else "degraded",
+            "ready": ready,
+            "local": local,
+            "nemotron": {
+                "ready": probe.ready,
+                "checked_at": probe.checked_at,
+                "latency_ms": probe.latency_ms,
+                "error": probe.error,
+            },
         }
 
 
@@ -164,11 +188,16 @@ def build_production_runtime(
     tools.register(files_tool_definition(), files_adapter)
     registered.append("files")
 
-    if config.github_token and config.github_allowed_repositories:
+    if config.github_allowed_repositories:
+        github_read_only = config.github_read_only or not bool(config.github_token)
         tools.register(
-            github_tool_definition(),
+            github_tool_definition(read_only=github_read_only),
             GitHubToolAdapter(
-                GitHubToolConfig(config.github_token, config.github_allowed_repositories),
+                GitHubToolConfig(
+                    token=config.github_token,
+                    allowed_repositories=config.github_allowed_repositories,
+                    read_only=github_read_only,
+                ),
                 capabilities,
             ),
         )
@@ -270,6 +299,14 @@ def build_production_runtime(
     )
     verify_task = VerifyTask(tasks, staff, policy, clock, audit)
     queries = ControlPlaneQueries(tasks, intents, idempotency, audit)
+    backups = SQLiteBackupManager(db_path, config.backup_dir, retention=config.backup_retention)
+    nemotron_readiness = NemotronReadinessProbe(
+        base_url=config.nemotron_base_url,
+        model=config.nemotron_model,
+        api_key=config.nemotron_api_key,
+        timeout_seconds=config.nemotron_readiness_timeout_seconds,
+        ttl_seconds=config.nemotron_readiness_ttl_seconds,
+    )
 
     return ProductionRuntime(
         config=config,
@@ -304,5 +341,7 @@ def build_production_runtime(
         execute_tool_task=execute_tool_task,
         verify_task=verify_task,
         queries=queries,
+        backups=backups,
+        nemotron_readiness=nemotron_readiness,
         registered_tools=tuple(registered),
     )
