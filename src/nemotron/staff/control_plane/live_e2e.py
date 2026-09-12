@@ -4,6 +4,7 @@ import json
 import os
 import secrets
 import tempfile
+from dataclasses import asdict
 from pathlib import Path
 
 from .config import ControlPlaneConfig
@@ -31,7 +32,7 @@ def main() -> int:
         )
         runtime = build_production_runtime(config)
         result = run_governed_e2e(runtime, prefix="live")
-        print(json.dumps(result.__dict__, ensure_ascii=False, indent=2))
+        print(json.dumps(asdict(result), ensure_ascii=False, indent=2))
     return 0
 
 
