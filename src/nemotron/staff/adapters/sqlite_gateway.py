@@ -49,10 +49,14 @@ class SQLiteGatewayStore:
                     tool_id TEXT,
                     operation TEXT,
                     receipt_reference TEXT,
-                    receipt_summary TEXT
+                    receipt_summary TEXT,
+                    output_json TEXT
                 );
                 """
             )
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(tool_idempotency)").fetchall()}
+            if "output_json" not in columns:
+                db.execute("ALTER TABLE tool_idempotency ADD COLUMN output_json TEXT")
 
 
 class SQLiteToolIntentRepository:
@@ -82,10 +86,7 @@ class SQLiteToolIntentRepository:
         db = self._store._connect()
         try:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute(
-                "SELECT * FROM tool_execution_intents WHERE task_id = ?",
-                (intent.task_id,),
-            ).fetchone()
+            row = db.execute("SELECT * FROM tool_execution_intents WHERE task_id = ?", (intent.task_id,)).fetchone()
             if row is not None:
                 existing = self._from_row(row)
                 if existing.fingerprint != intent.fingerprint:
@@ -130,6 +131,7 @@ class SQLiteIdempotencyRepository:
                 operation=row["operation"],
                 reference=row["receipt_reference"],
                 summary=row["receipt_summary"],
+                output_json=row["output_json"],
             )
         return IdempotencyRecord(
             key=row["key"],
@@ -172,7 +174,7 @@ class SQLiteIdempotencyRepository:
             db.execute("BEGIN IMMEDIATE")
             result = db.execute(
                 """UPDATE tool_idempotency
-                SET state = ?, tool_id = ?, operation = ?, receipt_reference = ?, receipt_summary = ?
+                SET state = ?, tool_id = ?, operation = ?, receipt_reference = ?, receipt_summary = ?, output_json = ?
                 WHERE key = ? AND fingerprint = ? AND state = ?""",
                 (
                     IdempotencyState.COMPLETED.value,
@@ -180,6 +182,7 @@ class SQLiteIdempotencyRepository:
                     receipt.operation,
                     receipt.reference,
                     receipt.summary,
+                    receipt.output_json,
                     key,
                     fingerprint,
                     IdempotencyState.PROCESSING.value,
