@@ -234,9 +234,13 @@ class ControlPlaneRequestHandler(BaseHTTPRequestHandler):
             return True
         if filename == "team-original.jpg":
             try:
-                body = base64.b64decode(asset.read_text(encoding="ascii"), validate=True)
+                encoded = b"".join(asset.read_bytes().split())
+                encoded += b"=" * ((4 - len(encoded) % 4) % 4)
+                body = base64.b64decode(encoded, validate=False)
             except (ValueError, OSError) as exc:
                 raise ValueError("Packaged team image is invalid.") from exc
+            if not body.startswith(b"\xff\xd8\xff") or not body.endswith(b"\xff\xd9"):
+                raise ValueError("Packaged team image failed JPEG signature validation.")
             content_type = "image/jpeg"
         else:
             body = asset.read_bytes()
