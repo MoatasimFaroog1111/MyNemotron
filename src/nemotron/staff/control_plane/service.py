@@ -55,7 +55,7 @@ class ControlPlaneService:
                 placement = organization.placement_for(staff_id)
             except LookupError:
                 continue
-            department = organization.department_for(placement.department_id)
+            department = organization.department_for(staff_id)
             return {
                 "organization_id": organization.organization_id,
                 "organization_name": organization.name,
