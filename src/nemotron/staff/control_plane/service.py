@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import secrets
 from dataclasses import asdict
 from typing import Any, Mapping
 
+from nemotron.staff.application.ports import GovernanceAuditEvent
 from nemotron.staff.application.tool_gateway import PrepareToolExecutionRequest
+from nemotron.staff.domain import PermissionDenied
 
 from .runtime import ProductionRuntime
 
@@ -16,6 +19,9 @@ class ControlPlaneService:
 
     def health(self) -> dict[str, object]:
         return self.runtime.health()
+
+    def readiness(self, *, force: bool = False) -> dict[str, object]:
+        return self.runtime.readiness(force=force)
 
     def config_summary(self) -> dict[str, object]:
         return self.runtime.config.redacted_summary()
@@ -43,6 +49,49 @@ class ControlPlaneService:
                 subject_id=subject_id,
             )
         )
+
+    def backups(self) -> list[dict[str, Any]]:
+        return [asdict(item) for item in self.runtime.backups.list()]
+
+    def create_backup(self, *, label: str = "manual", actor_id: str = "control-plane") -> dict[str, Any]:
+        info = self.runtime.backups.create(label)
+        self.runtime.audit.append(
+            GovernanceAuditEvent(
+                "backup.created",
+                "backup",
+                info.name,
+                actor_id,
+                self.runtime.clock.now(),
+                f"size_bytes={info.size_bytes}",
+            )
+        )
+        return asdict(info)
+
+    def restore_backup(
+        self,
+        name: str,
+        *,
+        recovery_token: str,
+        confirm: str,
+        actor_id: str = "recovery-admin",
+    ) -> dict[str, Any]:
+        configured = self.runtime.config.recovery_token
+        if not configured or not recovery_token or not secrets.compare_digest(configured, recovery_token):
+            raise PermissionDenied("Recovery authorization failed.")
+        if confirm != "RESTORE":
+            raise ValueError("Backup restore requires confirm='RESTORE'.")
+        info = self.runtime.backups.restore(name)
+        self.runtime.audit.append(
+            GovernanceAuditEvent(
+                "backup.restored",
+                "backup",
+                info.name,
+                actor_id,
+                self.runtime.clock.now(),
+                "SQLite restore completed after integrity validation.",
+            )
+        )
+        return asdict(info)
 
     def run_worker(self, staff_id: str) -> dict[str, Any]:
         result = self.runtime.worker.run_once(staff_id)
@@ -99,6 +148,7 @@ class ControlPlaneService:
         return self.runtime.queries.task_to_dict(task)
 
     def execute(self, task_id: str, *, actor_id: str) -> dict[str, Any]:
+        self.runtime.backups.create("pre-execution")
         result = self.runtime.execute_tool_task(task_id, actor_id)
         return {
             "task": self.runtime.queries.task_to_dict(result.task),
