@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import json
 import mimetypes
 import secrets
@@ -232,19 +231,12 @@ class ControlPlaneRequestHandler(BaseHTTPRequestHandler):
         if not asset.is_file():
             self._write_json(HTTPStatus.NOT_FOUND, {"error": "ui_asset_missing"})
             return True
-        if filename == "team-original.jpg":
-            try:
-                encoded = b"".join(asset.read_bytes().split())
-                encoded += b"=" * ((4 - len(encoded) % 4) % 4)
-                body = base64.b64decode(encoded, validate=False)
-            except (ValueError, OSError) as exc:
-                raise ValueError("Packaged team image is invalid.") from exc
-            if not body.startswith(b"\xff\xd8\xff") or not body.endswith(b"\xff\xd9"):
-                raise ValueError("Packaged team image failed JPEG signature validation.")
-            content_type = "image/jpeg"
-        else:
-            body = asset.read_bytes()
-            content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        body = asset.read_bytes()
+        if filename == "team-original.jpg" and (
+            not body.startswith(b"\xff\xd8\xff") or not body.endswith(b"\xff\xd9")
+        ):
+            raise ValueError("Packaged team image failed JPEG signature validation.")
+        content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
         if filename.endswith(".html"):
             csp = (
                 "default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'; "
