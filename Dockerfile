@@ -10,12 +10,17 @@ WORKDIR /app
 # runtime package instead of installing the full Nemotron training stack.
 COPY src/nemotron /app/src/nemotron
 COPY deploy/staff-entrypoint.py /app/staff-entrypoint.py
+COPY deploy/build_frontend_assets.py /app/deploy/build_frontend_assets.py
+
+# Build the same verified static asset that CI tests. The source repository
+# stores the image as deterministic Base64 chunks so connector/tooling limits
+# never corrupt the binary. Runtime serves only the reconstructed JPEG.
+RUN python /app/deploy/build_frontend_assets.py \
+    && mkdir -p /data/staff/backups /data/files \
+    && chown -R 65532:65532 /data /app
 
 # Use a numeric unprivileged identity so the image does not depend on
 # distribution-specific user-management utilities being installed.
-RUN mkdir -p /data/staff/backups /data/files \
-    && chown -R 65532:65532 /data /app
-
 USER 65532:65532
 
 EXPOSE 8088
