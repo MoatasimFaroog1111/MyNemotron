@@ -1,0 +1,1 @@
+The production frontend uses a normal tracked JPEG asset at `src/nemotron/staff/control_plane/frontend/team-original.jpg`. Binary assets must be committed as Git blobs; do not encode provider credentials or runtime secrets into frontend assets. Temporary Base64 packaging used during connector troubleshooting is not part of the production architecture.
