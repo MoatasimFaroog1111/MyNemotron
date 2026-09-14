@@ -32,6 +32,7 @@ drawer.style.background='transparent';
 
 function esc(value){return String(value??'').replace(/[&<>'\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','\"':'&quot;'}[c]));}
 function fmtTime(value){if(!value)return '—';try{return new Intl.DateTimeFormat('ar-SA',{dateStyle:'short',timeStyle:'short'}).format(new Date(value));}catch{return String(value);}}
+function sleep(ms){return new Promise(resolve=>setTimeout(resolve,ms));}
 async function api(path,options={}){
   const {headers={},...rest}=options;
   const response=await fetch(path,{credentials:'same-origin',...rest,headers:{Accept:'application/json',...headers}});
@@ -89,7 +90,7 @@ function renderAudit(items){if(!items?.length)return '<div class="empty">لا ي
 function instructionCard(member){return `
   <div class="card instruction-card">
     <h3>إرسال تعليمات إلى الموظف</h3>
-    <p>اكتب المطلوب بوضوح. سيتم إسناد التعليمات وتشغيل الموظف مباشرة، ثم تظهر النتيجة هنا دون تجاوز صلاحياته أو بوابات الموافقة والتنفيذ.</p>
+    <p>اكتب المطلوب بوضوح. سيتم إسناد التعليمات فورًا، ويكمل الموظف التنفيذ في الخلفية بينما تتابع الواجهة النتيجة تلقائيًا دون تجاوز الصلاحيات أو بوابات الموافقة والتنفيذ.</p>
     <form class="instruction-form" id="instructionForm">
       <label for="instructionText">التعليمات</label>
       <textarea id="instructionText" name="instruction" maxlength="8000" rows="5" required placeholder="مثال: راجع آخر التسويات البنكية وحدد البنود التي تحتاج تحقيقًا إضافيًا."></textarea>
@@ -120,6 +121,30 @@ function renderWorkspace(member,data){
   form?.addEventListener('submit',event=>submitInstruction(member,event));
 }
 
+function instructionOutcome(data,workItemId,taskId){
+  const task=(data.tasks||[]).find(item=>item.task_id===taskId);
+  if(task?.decision?.rationale)return {done:true,ok:true,text:task.decision.rationale};
+  const audit=(data.audit||[]).find(item=>item.subject_type==='work_item'&&item.subject_id===workItemId&&[
+    'worker.work_blocked','worker.governance_blocked','worker.retry_exhausted','ui.instruction_background_failed'
+  ].includes(item.event_type));
+  if(audit)return {done:true,ok:false,text:audit.detail||'توقف التنفيذ ويحتاج مراجعة.'};
+  return {done:false,ok:false,text:'جاري التنفيذ…'};
+}
+
+async function waitForInstructionResult(member,workItemId,taskId){
+  const started=Date.now();
+  while(Date.now()-started<180000){
+    await sleep(2000);
+    const data=await api(`/ui/api/staff/${encodeURIComponent(member.staff_id)}/workspace`);
+    const outcome=instructionOutcome(data,workItemId,taskId);
+    if(outcome.done)return {data,...outcome};
+    const feedback=document.getElementById('instructionFeedback');
+    if(feedback){feedback.className='instruction-feedback pending';feedback.textContent='تم استلام التعليمات. الموظف يعمل الآن…';}
+  }
+  const data=await api(`/ui/api/staff/${encodeURIComponent(member.staff_id)}/workspace`);
+  return {data,done:false,ok:false,text:'التنفيذ ما زال جاريًا. يمكنك إبقاء الصفحة مفتوحة أو الرجوع لاحقًا إلى المهام المحكومة.'};
+}
+
 async function submitInstruction(member,event){
   event.preventDefault();
   const form=event.currentTarget;
@@ -130,7 +155,7 @@ async function submitInstruction(member,event){
   if(!instruction)return;
   button.disabled=true;
   feedback.className='instruction-feedback pending';
-  feedback.textContent='جاري إسناد التعليمات وتشغيل الموظف…';
+  feedback.textContent='جاري إسناد التعليمات…';
   try{
     const result=await api(`/ui/api/staff/${encodeURIComponent(member.staff_id)}/instructions`,{
       method:'POST',
@@ -138,22 +163,25 @@ async function submitInstruction(member,event){
       body:JSON.stringify({instruction})
     });
     input.value='';
-    const data=await api(`/ui/api/staff/${encodeURIComponent(member.staff_id)}/workspace`);
-    renderWorkspace(member,data);
+    feedback.className='instruction-feedback pending';
+    feedback.textContent='تم استلام التعليمات. الموظف يعمل الآن…';
+    const outcome=await waitForInstructionResult(member,result.work_item_id,result.execution?.task_id||`work-task:${result.work_item_id}`);
+    renderWorkspace(member,outcome.data);
     const refreshedFeedback=document.getElementById('instructionFeedback');
     if(refreshedFeedback){
-      const status=result.execution?.status||result.status||'unknown';
-      const text=result.result?.text||result.execution?.detail||'تمت معالجة التعليمات.';
-      const ok=status==='handoff_ready';
-      refreshedFeedback.className=`instruction-feedback ${ok?'success':status==='queued'?'pending':'error'}`;
-      refreshedFeedback.textContent=ok?`تم التنفيذ بنجاح · ${text}`:`حالة التنفيذ: ${status} · ${text}`;
+      refreshedFeedback.className=`instruction-feedback ${outcome.ok?'success':outcome.done?'error':'pending'}`;
+      refreshedFeedback.textContent=outcome.ok?`تم التنفيذ بنجاح · ${outcome.text}`:outcome.text;
     }
   }catch(error){
     if(error.message!=='unauthorized'){
-      feedback.className='instruction-feedback error';
-      feedback.textContent='تعذر تنفيذ التعليمات. تحقق من صلاحيات الموظف وحالة Control Plane.';
+      const current=document.getElementById('instructionFeedback')||feedback;
+      current.className='instruction-feedback error';
+      current.textContent='تعذر متابعة التنفيذ. تحقق من الاتصال وحالة Control Plane ثم أعد فتح مساحة الموظف.';
     }
-  }finally{button.disabled=false;}
+  }finally{
+    const currentButton=document.querySelector('#instructionForm button[type="submit"]');
+    if(currentButton)currentButton.disabled=false;
+  }
 }
 
 async function selectStaff(member){

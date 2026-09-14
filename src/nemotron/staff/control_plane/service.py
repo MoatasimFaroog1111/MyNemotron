@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import secrets
+import threading
 from dataclasses import asdict
 from typing import Any, Mapping
 
@@ -113,6 +114,21 @@ class ControlPlaneService:
             "audit": audit,
         }
 
+    def _process_staff_instruction(self, staff_id: str, work_item_id: str) -> None:
+        try:
+            self.runtime.worker.run_until_idle(staff_id, max_items=20)
+        except Exception as exc:
+            self.runtime.audit.append(
+                GovernanceAuditEvent(
+                    "ui.instruction_background_failed",
+                    "work_item",
+                    work_item_id,
+                    staff_id,
+                    self.runtime.clock.now(),
+                    f"background worker failed safely: {type(exc).__name__}",
+                )
+            )
+
     def submit_staff_instruction(self, staff_id: str, instruction: str) -> dict[str, Any]:
         item = self.runtime.submit_direct_instruction(
             SubmitDirectInstructionRequest(staff_id=staff_id, instruction=instruction)
@@ -139,46 +155,29 @@ class ControlPlaneService:
             )
         )
 
-        runs = self.runtime.worker.run_until_idle(staff_id, max_items=20)
-        run = next((candidate for candidate in runs if candidate.work_item_id == item.work_item_id), None)
-
-        if run is None:
-            return {
-                "accepted": True,
-                "staff_id": item.assigned_staff_id,
-                "work_item_id": item.work_item_id,
-                "goal_id": item.goal_id,
-                "status": "queued",
-                "title": item.title,
-                "execution": {"status": "queued", "task_id": None, "task_state": None, "detail": "Instruction remains queued behind earlier work."},
-                "result": {"text": "تم حفظ التعليمات في الطابور، وستظهر النتيجة بعد أن يصل إليها الموظف."},
-            }
-
-        task_payload = None
-        if run.task_id:
-            try:
-                task_payload = self.runtime.queries.task(run.task_id)
-            except LookupError:
-                task_payload = None
-
-        result_text = run.detail
-        if task_payload and task_payload.get("decision"):
-            result_text = str(task_payload["decision"].get("rationale") or run.detail)
+        expected_task_id = f"work-task:{item.work_item_id}"
+        worker_thread = threading.Thread(
+            target=self._process_staff_instruction,
+            args=(staff_id, item.work_item_id),
+            name=f"staff-instruction-{item.work_item_id[:10]}",
+            daemon=True,
+        )
+        worker_thread.start()
 
         return {
             "accepted": True,
             "staff_id": item.assigned_staff_id,
             "work_item_id": item.work_item_id,
             "goal_id": item.goal_id,
-            "status": run.status.value,
+            "status": "queued",
             "title": item.title,
             "execution": {
-                "status": run.status.value,
-                "task_id": run.task_id,
-                "task_state": run.task_state.value if run.task_state else None,
-                "detail": run.detail,
+                "status": "processing",
+                "task_id": expected_task_id,
+                "task_state": None,
+                "detail": "Instruction accepted; governed worker is processing asynchronously.",
             },
-            "result": {"text": result_text, "task": task_payload},
+            "result": {"text": "تم استلام التعليمات وبدأ الموظف تنفيذها. ستظهر النتيجة تلقائيًا عند اكتمالها."},
         }
 
     def ui_overview(self) -> dict[str, Any]:
