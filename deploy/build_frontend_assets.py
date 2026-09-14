@@ -5,9 +5,9 @@ import binascii
 import hashlib
 from pathlib import Path
 
-EXPECTED_PART_COUNT = 40
-EXPECTED_SHA256 = "e5693d8f2da200889b0531b22479fafdc52492c71efb01759f8ee1cac6bc606b"
-MIN_JPEG_BYTES = 100_000
+EXPECTED_PART_COUNT = 12
+EXPECTED_SHA256 = "0d768106d4066439080857a7fc50ec380755769b2019285bb2bdb8f9af545db5"
+MIN_JPEG_BYTES = 40_000
 
 
 def _frontend_root() -> Path:
