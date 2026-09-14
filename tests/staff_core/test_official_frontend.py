@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 import urllib.error
@@ -13,6 +14,10 @@ from nemotron.staff.control_plane.runtime import build_production_runtime
 from nemotron.staff.control_plane.service import ControlPlaneService
 from nemotron.staff.domain import Permission, RiskLevel, Role, StaffMember
 from nemotron.staff.domain.organization import Department, Organization, StaffPlacement
+
+
+EXPECTED_TEAM_IMAGE_SHA256 = "2456fa2e68961690b6cd67b83e6bf9875f7bbe5e8d1a90127006eeb7147a3d4f"
+EXPECTED_TEAM_IMAGE_BYTES = 25_818
 
 
 def _config(tmp_path) -> ControlPlaneConfig:  # type: ignore[no-untyped-def]
@@ -75,9 +80,9 @@ def test_official_frontend_is_same_origin_and_api_token_is_not_embedded(tmp_path
         with urllib.request.urlopen(root + "/ui/", timeout=5) as response:
             html = response.read().decode("utf-8")
             csp = response.headers["Content-Security-Policy"]
-        assert "فريق العمل التفاعلي" in html
+        assert "مكتب الذكاء الاصطناعي" in html
         assert "/ui/app.js" in html
-        assert "/ui/team-original.jpg" in html
+        assert "/ui/team-original.jpg?v=20260914-hq1" in html
         assert 'width="1080" height="832"' in html
         assert config.api_token not in html
         assert "script-src 'self'" in csp
@@ -86,10 +91,10 @@ def test_official_frontend_is_same_origin_and_api_token_is_not_embedded(tmp_path
         with urllib.request.urlopen(root + "/ui/team-original.jpg", timeout=5) as response:
             image = response.read()
             assert response.headers["Content-Type"] == "image/jpeg"
-        # The static asset must be a complete JPEG. Quality is handled by the
-        # web-optimized source image; file size is deliberately not a policy gate.
         assert image.startswith(b"\xff\xd8\xff")
         assert image.endswith(b"\xff\xd9")
+        assert len(image) == EXPECTED_TEAM_IMAGE_BYTES
+        assert hashlib.sha256(image).hexdigest() == EXPECTED_TEAM_IMAGE_SHA256
 
         with pytest.raises(urllib.error.HTTPError) as exc_info:
             urllib.request.urlopen(root + "/ui/api/staff", timeout=5)
