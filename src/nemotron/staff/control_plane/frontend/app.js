@@ -26,7 +26,7 @@ const loginError=document.getElementById('loginError');
 let zoom=1;
 let staff=[];
 
-function esc(value){return String(value??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
+function esc(value){return String(value??'').replace(/[&<>'\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','\"':'&quot;'}[c]));}
 function fmtTime(value){if(!value)return '—';try{return new Intl.DateTimeFormat('ar-SA',{dateStyle:'short',timeStyle:'short'}).format(new Date(value));}catch{return String(value);}}
 async function api(path,options={}){
   const response=await fetch(path,{credentials:'same-origin',headers:{Accept:'application/json',...(options.headers||{})},...options});
@@ -146,3 +146,72 @@ async function bootstrap(){
 }
 
 bootstrap();
+
+// Full-screen office projection. The image uses object-fit: cover, so the
+// visible origin changes with the viewport. Re-project every percentage slot
+// from the stable 1080x832 coordinate system into the covered viewport.
+const OFFICE_SOURCE_WIDTH=1080;
+const OFFICE_SOURCE_HEIGHT=832;
+const teamImage=document.getElementById('teamImage');
+const connectionState=document.getElementById('connectionState');
+const liteToggle=document.getElementById('liteToggle');
+let officeLayoutFrame=0;
+
+function readSlotValue(node,name){return Number.parseFloat(node.style.getPropertyValue(name))||0;}
+function layoutOfficeHotspots(){
+  cancelAnimationFrame(officeLayoutFrame);
+  officeLayoutFrame=requestAnimationFrame(()=>{
+    const width=stage.clientWidth;
+    const height=stage.clientHeight;
+    if(!width||!height)return;
+    const scale=Math.max(width/OFFICE_SOURCE_WIDTH,height/OFFICE_SOURCE_HEIGHT);
+    const renderedWidth=OFFICE_SOURCE_WIDTH*scale;
+    const renderedHeight=OFFICE_SOURCE_HEIGHT*scale;
+    const offsetX=(width-renderedWidth)/2;
+    const offsetY=(height-renderedHeight)/2;
+    stage.querySelectorAll('.hotspot').forEach(button=>{
+      const x=readSlotValue(button,'--x')/100*OFFICE_SOURCE_WIDTH;
+      const y=readSlotValue(button,'--y')/100*OFFICE_SOURCE_HEIGHT;
+      const w=readSlotValue(button,'--w')/100*OFFICE_SOURCE_WIDTH;
+      const h=readSlotValue(button,'--h')/100*OFFICE_SOURCE_HEIGHT;
+      button.style.left=`${offsetX+x*scale}px`;
+      button.style.top=`${offsetY+y*scale}px`;
+      button.style.width=`${Math.max(24,w*scale)}px`;
+      button.style.height=`${Math.max(24,h*scale)}px`;
+    });
+  });
+}
+
+function setConnectionState(text,connected){
+  if(!connectionState)return;
+  connectionState.textContent=text;
+  connectionState.closest('.system-state')?.classList.toggle('offline',!connected);
+}
+
+const stageObserver=new MutationObserver(records=>{
+  if(records.some(record=>[...record.addedNodes].some(node=>node.nodeType===1&&node.classList?.contains('hotspot')))){
+    setConnectionState('متصل',true);
+    layoutOfficeHotspots();
+  }
+});
+stageObserver.observe(stage,{childList:true});
+
+const loginObserver=new MutationObserver(()=>{
+  const locked=login.getAttribute('aria-hidden')!=='true';
+  if(locked)setConnectionState('يتطلب دخول',false);
+});
+loginObserver.observe(login,{attributes:true,attributeFilter:['aria-hidden']});
+
+if('ResizeObserver' in window)new ResizeObserver(layoutOfficeHotspots).observe(stage);
+window.addEventListener('resize',layoutOfficeHotspots,{passive:true});
+window.visualViewport?.addEventListener('resize',layoutOfficeHotspots,{passive:true});
+teamImage?.addEventListener('load',layoutOfficeHotspots,{once:false});
+
+if(liteToggle){
+  liteToggle.addEventListener('click',()=>{
+    const enabled=document.body.classList.toggle('lite-mode');
+    liteToggle.setAttribute('aria-pressed',String(enabled));
+  });
+}
+
+layoutOfficeHotspots();
