@@ -9,7 +9,12 @@ WORKDIR /app
 # The Staff Control Plane is deliberately dependency-light. Copy only the
 # runtime package instead of installing the full Nemotron training stack.
 COPY src/nemotron /app/src/nemotron
+COPY deploy/build_frontend_assets.py /app/deploy/build_frontend_assets.py
 COPY deploy/staff-entrypoint.py /app/staff-entrypoint.py
+
+# Reconstruct the web-optimized team image from its small, reviewable text
+# package and fail the image build if size, JPEG markers, or SHA-256 differ.
+RUN python /app/deploy/build_frontend_assets.py
 
 # Use a numeric unprivileged identity so the image does not depend on
 # distribution-specific user-management utilities being installed.
