@@ -33,7 +33,8 @@ drawer.style.background='transparent';
 function esc(value){return String(value??'').replace(/[&<>'\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','\"':'&quot;'}[c]));}
 function fmtTime(value){if(!value)return '—';try{return new Intl.DateTimeFormat('ar-SA',{dateStyle:'short',timeStyle:'short'}).format(new Date(value));}catch{return String(value);}}
 async function api(path,options={}){
-  const response=await fetch(path,{credentials:'same-origin',headers:{Accept:'application/json',...(options.headers||{})},...options});
+  const {headers={},...rest}=options;
+  const response=await fetch(path,{credentials:'same-origin',...rest,headers:{Accept:'application/json',...headers}});
   if(response.status===401){showLogin();throw new Error('unauthorized');}
   if(!response.ok){throw new Error(`HTTP ${response.status}`);}
   if(response.status===204)return null;
@@ -81,28 +82,82 @@ function closeDrawer(){drawer.classList.remove('open');drawer.setAttribute('aria
 function openDrawer(name,role){document.getElementById('employeeName').textContent=name;document.getElementById('employeeRole').textContent=role||'';drawer.classList.add('open');drawer.setAttribute('aria-hidden','false');document.getElementById('close').focus();}
 function statusBadge(status){const active=status==='active';return `<span class="status ${active?'':'warn'}"><span class="dot"></span>${active?'نشط':'موقوف'}</span>`;}
 function renderPermissions(items){if(!items?.length)return '<div class="empty">لا توجد صلاحيات مسجلة.</div>';return `<div class="chips">${items.map(p=>`<span class="chip">${esc(p.action)} · ${esc(p.resource)} · ${esc(p.max_risk)}</span>`).join('')}</div>`;}
-function renderTasks(items){if(!items?.length)return '<div class="empty">لا توجد مهام مسندة لهذا الموظف حاليًا.</div>';return items.map(t=>`<div class="task"><div class="task-head"><span class="task-title">${esc(t.title)}</span><span class="task-state">${esc(t.state)}</span></div><small>${esc(t.action)} → ${esc(t.resource)} · risk=${esc(t.risk)}<br>${esc(t.task_id)}</small></div>`).join('');}
+function renderQueuedWork(items){if(!items?.length)return '<div class="empty">لا توجد تعليمات في طابور هذا الموظف.</div>';return items.map(item=>`<div class="task"><div class="task-head"><span class="task-title">${esc(item.title)}</span><span class="task-state">${esc(item.status)}</span></div><small>${esc(item.action)} → ${esc(item.resource)} · risk=${esc(item.risk)}<br>${esc(item.work_item_id)}</small></div>`).join('');}
+function renderTasks(items){if(!items?.length)return '<div class="empty">لا توجد مهام محكومة لهذا الموظف حاليًا.</div>';return items.map(t=>`<div class="task"><div class="task-head"><span class="task-title">${esc(t.title)}</span><span class="task-state">${esc(t.state)}</span></div><small>${esc(t.action)} → ${esc(t.resource)} · risk=${esc(t.risk)}<br>${esc(t.task_id)}</small></div>`).join('');}
 function renderAudit(items){if(!items?.length)return '<div class="empty">لا يوجد نشاط حديث لهذا الموظف.</div>';return items.slice(0,20).map(a=>`<div class="audit"><strong>${esc(a.event_type)}</strong><small>${esc(a.subject_type)} / ${esc(a.subject_id)} · ${fmtTime(a.occurred_at)}</small></div>`).join('');}
+
+function instructionCard(member){return `
+  <div class="card instruction-card">
+    <h3>إرسال تعليمات إلى الموظف</h3>
+    <p>اكتب المطلوب بوضوح. سترسل الواجهة التعليمات إلى Control Plane وتضعها في طابور هذا الموظف دون تجاوز صلاحياته أو بوابات الموافقة والتنفيذ.</p>
+    <form class="instruction-form" id="instructionForm">
+      <label for="instructionText">التعليمات</label>
+      <textarea id="instructionText" name="instruction" maxlength="8000" rows="5" required placeholder="مثال: راجع آخر التسويات البنكية وحدد البنود التي تحتاج تحقيقًا إضافيًا."></textarea>
+      <div class="instruction-meta"><span>${esc(member.display_name)}</span><span>حد أقصى 8000 حرف</span></div>
+      <div class="actions"><button class="primary" type="submit">إسناد التعليمات</button></div>
+      <div class="instruction-feedback" id="instructionFeedback" aria-live="polite"></div>
+    </form>
+  </div>`;}
+
+function renderWorkspace(member,data){
+  const placement=data.placement||{};
+  workspaceBody.innerHTML=`
+    ${statusBadge(data.status)}
+    ${instructionCard(member)}
+    <div class="card"><h3>هوية الموظف</h3><dl class="meta">
+      <dt>Staff ID</dt><dd>${esc(data.staff_id)}</dd>
+      <dt>الدور</dt><dd>${esc(data.role_name)}</dd>
+      <dt>المسمى</dt><dd>${esc(placement.job_title||'—')}</dd>
+      <dt>القسم</dt><dd>${esc(placement.department_name||'—')}</dd>
+      <dt>المدير</dt><dd>${esc(placement.manager_id||'—')}</dd>
+      <dt>المنظمة</dt><dd>${esc(placement.organization_name||'—')}</dd>
+    </dl></div>
+    <div class="card"><h3>العمل في الطابور</h3>${renderQueuedWork(data.queued_work)}</div>
+    <div class="card"><h3>الصلاحيات المحكومة</h3>${renderPermissions(data.permissions)}</div>
+    <div class="card"><h3>المهام المحكومة</h3>${renderTasks(data.tasks)}</div>
+    <div class="card"><h3>النشاط الحديث</h3>${renderAudit(data.audit)}</div>`;
+  const form=document.getElementById('instructionForm');
+  form?.addEventListener('submit',event=>submitInstruction(member,event));
+}
+
+async function submitInstruction(member,event){
+  event.preventDefault();
+  const form=event.currentTarget;
+  const input=form.querySelector('#instructionText');
+  const button=form.querySelector('button[type="submit"]');
+  const feedback=form.querySelector('#instructionFeedback');
+  const instruction=input.value.trim();
+  if(!instruction)return;
+  button.disabled=true;
+  feedback.className='instruction-feedback pending';
+  feedback.textContent='جاري إرسال التعليمات إلى الـbackend…';
+  try{
+    const result=await api(`/ui/api/staff/${encodeURIComponent(member.staff_id)}/instructions`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({instruction})
+    });
+    input.value='';
+    feedback.className='instruction-feedback success';
+    feedback.textContent=`تم الإسناد بنجاح · ${result.work_item_id}`;
+    const data=await api(`/ui/api/staff/${encodeURIComponent(member.staff_id)}/workspace`);
+    renderWorkspace(member,data);
+    const refreshedFeedback=document.getElementById('instructionFeedback');
+    if(refreshedFeedback){refreshedFeedback.className='instruction-feedback success';refreshedFeedback.textContent=`تم الإسناد بنجاح · ${result.work_item_id}`;}
+  }catch(error){
+    if(error.message!=='unauthorized'){
+      feedback.className='instruction-feedback error';
+      feedback.textContent='تعذر إسناد التعليمات. تحقق من صلاحيات الموظف وحالة Control Plane.';
+    }
+  }finally{button.disabled=false;}
+}
 
 async function selectStaff(member){
   openDrawer(member.display_name,member.role_name);
   workspaceBody.innerHTML='<div class="loading">جاري تحميل مساحة العمل من Control Plane…</div>';
   try{
     const data=await api(`/ui/api/staff/${encodeURIComponent(member.staff_id)}/workspace`);
-    const placement=data.placement||{};
-    workspaceBody.innerHTML=`
-      ${statusBadge(data.status)}
-      <div class="card"><h3>هوية الموظف</h3><dl class="meta">
-        <dt>Staff ID</dt><dd>${esc(data.staff_id)}</dd>
-        <dt>الدور</dt><dd>${esc(data.role_name)}</dd>
-        <dt>المسمى</dt><dd>${esc(placement.job_title||'—')}</dd>
-        <dt>القسم</dt><dd>${esc(placement.department_name||'—')}</dd>
-        <dt>المدير</dt><dd>${esc(placement.manager_id||'—')}</dd>
-        <dt>المنظمة</dt><dd>${esc(placement.organization_name||'—')}</dd>
-      </dl></div>
-      <div class="card"><h3>الصلاحيات المحكومة</h3>${renderPermissions(data.permissions)}</div>
-      <div class="card"><h3>المهام</h3>${renderTasks(data.tasks)}</div>
-      <div class="card"><h3>النشاط الحديث</h3>${renderAudit(data.audit)}</div>`;
+    renderWorkspace(member,data);
   }catch(error){if(error.message!=='unauthorized')workspaceBody.innerHTML='<div class="error">تعذر تحميل مساحة العمل من Control Plane.</div>';}
 }
 
@@ -134,7 +189,7 @@ function buildHotspots(){
 }
 
 async function showOverview(){
-  openDrawer('لوحة التحكم','Control Plane — Read only');
+  openDrawer('لوحة التحكم','Control Plane');
   workspaceBody.innerHTML='<div class="loading">جاري تحميل الحالة التشغيلية…</div>';
   try{
     const data=await api('/ui/api/overview');
