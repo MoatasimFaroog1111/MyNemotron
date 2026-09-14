@@ -8,6 +8,7 @@ from nemotron.staff.application.direct_instructions import SubmitDirectInstructi
 from nemotron.staff.application.ports import GovernanceAuditEvent
 from nemotron.staff.application.tool_gateway import PrepareToolExecutionRequest
 from nemotron.staff.domain import PermissionDenied
+from nemotron.staff.domain.runtime import MemoryEntry, MemoryScope
 
 from .runtime import ProductionRuntime
 
@@ -37,7 +38,6 @@ class ControlPlaneService:
         return self.runtime.queries.task(task_id)
 
     def staff_directory(self) -> list[dict[str, Any]]:
-        """Return safe Staff Registry metadata for the official UI; never return secrets or tool handles."""
         return [
             {
                 "staff_id": member.staff_id,
@@ -93,12 +93,7 @@ class ControlPlaneService:
         audit = []
         for item in self.runtime.audit.list_recent(limit=250):
             if item.actor_id == staff_id or (item.subject_type == "task" and item.subject_id in task_ids):
-                audit.append(
-                    {
-                        **asdict(item),
-                        "occurred_at": item.occurred_at.isoformat(),
-                    }
-                )
+                audit.append({**asdict(item), "occurred_at": item.occurred_at.isoformat()})
             if len(audit) >= 40:
                 break
         return {
@@ -109,11 +104,7 @@ class ControlPlaneService:
             "role_name": member.role.name,
             "approval_limit": member.role.approval_limit.value if member.role.approval_limit else None,
             "permissions": [
-                {
-                    "action": permission.action,
-                    "resource": permission.resource,
-                    "max_risk": permission.max_risk.value,
-                }
+                {"action": permission.action, "resource": permission.resource, "max_risk": permission.max_risk.value}
                 for permission in member.role.permissions
             ],
             "placement": self._placement_for(staff_id),
@@ -124,22 +115,73 @@ class ControlPlaneService:
 
     def submit_staff_instruction(self, staff_id: str, instruction: str) -> dict[str, Any]:
         item = self.runtime.submit_direct_instruction(
-            SubmitDirectInstructionRequest(
-                staff_id=staff_id,
-                instruction=instruction,
+            SubmitDirectInstructionRequest(staff_id=staff_id, instruction=instruction)
+        )
+
+        memory = MemoryEntry(
+            memory_id=self.runtime.ids.new_id(),
+            organization_id=item.organization_id,
+            owner_staff_id=staff_id,
+            scope=MemoryScope.PRIVATE,
+            content=instruction.strip(),
+            created_at=self.runtime.clock.now(),
+            source_reference=f"ui-instruction:{item.work_item_id}",
+        )
+        self.runtime.memories.save(memory)
+        self.runtime.audit.append(
+            GovernanceAuditEvent(
+                "ui.instruction_memory_recorded",
+                "memory",
+                memory.memory_id,
+                "ui-operator",
+                memory.created_at,
+                f"work_item_id={item.work_item_id}; staff_id={staff_id}",
             )
         )
+
+        runs = self.runtime.worker.run_until_idle(staff_id, max_items=20)
+        run = next((candidate for candidate in runs if candidate.work_item_id == item.work_item_id), None)
+
+        if run is None:
+            return {
+                "accepted": True,
+                "staff_id": item.assigned_staff_id,
+                "work_item_id": item.work_item_id,
+                "goal_id": item.goal_id,
+                "status": "queued",
+                "title": item.title,
+                "execution": {"status": "queued", "task_id": None, "task_state": None, "detail": "Instruction remains queued behind earlier work."},
+                "result": {"text": "تم حفظ التعليمات في الطابور، وستظهر النتيجة بعد أن يصل إليها الموظف."},
+            }
+
+        task_payload = None
+        if run.task_id:
+            try:
+                task_payload = self.runtime.queries.task(run.task_id)
+            except LookupError:
+                task_payload = None
+
+        result_text = run.detail
+        if task_payload and task_payload.get("decision"):
+            result_text = str(task_payload["decision"].get("rationale") or run.detail)
+
         return {
             "accepted": True,
             "staff_id": item.assigned_staff_id,
             "work_item_id": item.work_item_id,
             "goal_id": item.goal_id,
-            "status": item.status.value,
+            "status": run.status.value,
             "title": item.title,
+            "execution": {
+                "status": run.status.value,
+                "task_id": run.task_id,
+                "task_state": run.task_state.value if run.task_state else None,
+                "detail": run.detail,
+            },
+            "result": {"text": result_text, "task": task_payload},
         }
 
     def ui_overview(self) -> dict[str, Any]:
-        """Safe operational summary for the official frontend."""
         return {
             "health": self.health(),
             "approvals": self.approval_inbox(),
@@ -147,62 +189,25 @@ class ControlPlaneService:
             "audit": self.audit_timeline(limit=80),
         }
 
-    def audit_timeline(
-        self,
-        *,
-        limit: int = 100,
-        subject_type: str | None = None,
-        subject_id: str | None = None,
-    ) -> list[dict[str, Any]]:
-        return list(
-            self.runtime.queries.audit_timeline(
-                limit=limit,
-                subject_type=subject_type,
-                subject_id=subject_id,
-            )
-        )
+    def audit_timeline(self, *, limit: int = 100, subject_type: str | None = None, subject_id: str | None = None) -> list[dict[str, Any]]:
+        return list(self.runtime.queries.audit_timeline(limit=limit, subject_type=subject_type, subject_id=subject_id))
 
     def backups(self) -> list[dict[str, Any]]:
         return [asdict(item) for item in self.runtime.backups.list()]
 
     def create_backup(self, *, label: str = "manual", actor_id: str = "control-plane") -> dict[str, Any]:
         info = self.runtime.backups.create(label)
-        self.runtime.audit.append(
-            GovernanceAuditEvent(
-                "backup.created",
-                "backup",
-                info.name,
-                actor_id,
-                self.runtime.clock.now(),
-                f"size_bytes={info.size_bytes}",
-            )
-        )
+        self.runtime.audit.append(GovernanceAuditEvent("backup.created", "backup", info.name, actor_id, self.runtime.clock.now(), f"size_bytes={info.size_bytes}"))
         return asdict(info)
 
-    def restore_backup(
-        self,
-        name: str,
-        *,
-        recovery_token: str,
-        confirm: str,
-        actor_id: str = "recovery-admin",
-    ) -> dict[str, Any]:
+    def restore_backup(self, name: str, *, recovery_token: str, confirm: str, actor_id: str = "recovery-admin") -> dict[str, Any]:
         configured = self.runtime.config.recovery_token
         if not configured or not recovery_token or not secrets.compare_digest(configured, recovery_token):
             raise PermissionDenied("Recovery authorization failed.")
         if confirm != "RESTORE":
             raise ValueError("Backup restore requires confirm='RESTORE'.")
         info = self.runtime.backups.restore(name)
-        self.runtime.audit.append(
-            GovernanceAuditEvent(
-                "backup.restored",
-                "backup",
-                info.name,
-                actor_id,
-                self.runtime.clock.now(),
-                "SQLite restore completed after integrity validation.",
-            )
-        )
+        self.runtime.audit.append(GovernanceAuditEvent("backup.restored", "backup", info.name, actor_id, self.runtime.clock.now(), "SQLite restore completed after integrity validation."))
         return asdict(info)
 
     def run_worker(self, staff_id: str) -> dict[str, Any]:
@@ -216,23 +221,9 @@ class ControlPlaneService:
             "detail": result.detail,
         }
 
-    def prepare_tool_execution(
-        self,
-        task_id: str,
-        *,
-        actor_id: str,
-        tool_id: str,
-        operation: str,
-        arguments: Mapping[str, Any],
-    ) -> dict[str, Any]:
+    def prepare_tool_execution(self, task_id: str, *, actor_id: str, tool_id: str, operation: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
         intent = self.runtime.prepare_tool_execution(
-            PrepareToolExecutionRequest(
-                task_id=task_id,
-                actor_id=actor_id,
-                tool_id=tool_id,
-                operation=operation,
-                arguments=arguments,
-            )
+            PrepareToolExecutionRequest(task_id=task_id, actor_id=actor_id, tool_id=tool_id, operation=operation, arguments=arguments)
         )
         return {
             "task_id": intent.task_id,
@@ -243,20 +234,8 @@ class ControlPlaneService:
             "prepared_at": intent.prepared_at.isoformat(),
         }
 
-    def decide_approval(
-        self,
-        task_id: str,
-        *,
-        approver_id: str,
-        approved: bool,
-        rationale: str,
-    ) -> dict[str, Any]:
-        task = self.runtime.approve_task(
-            task_id,
-            approver_id,
-            approved=approved,
-            rationale=rationale,
-        )
+    def decide_approval(self, task_id: str, *, approver_id: str, approved: bool, rationale: str) -> dict[str, Any]:
+        task = self.runtime.approve_task(task_id, approver_id, approved=approved, rationale=rationale)
         return self.runtime.queries.task_to_dict(task)
 
     def execute(self, task_id: str, *, actor_id: str) -> dict[str, Any]:
@@ -274,18 +253,6 @@ class ControlPlaneService:
             "recovered": result.recovered,
         }
 
-    def verify(
-        self,
-        task_id: str,
-        *,
-        verifier_id: str,
-        passed: bool,
-        summary: str,
-    ) -> dict[str, Any]:
-        task = self.runtime.verify_task(
-            task_id,
-            verifier_id,
-            passed=passed,
-            summary=summary,
-        )
+    def verify(self, task_id: str, *, verifier_id: str, passed: bool, summary: str) -> dict[str, Any]:
+        task = self.runtime.verify_task(task_id, verifier_id, passed=passed, summary=summary)
         return self.runtime.queries.task_to_dict(task)
