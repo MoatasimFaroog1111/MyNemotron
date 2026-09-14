@@ -1,0 +1,13 @@
+.instruction-card{border-color:#b9dce8;background:linear-gradient(180deg,#fff 0%,#f5fbfd 100%)}
+.instruction-form{margin-top:14px}
+.instruction-form label{display:block;margin-bottom:7px;font-size:13px;font-weight:800;color:#294b59}
+.instruction-form textarea{width:100%;min-height:120px;resize:vertical;border:1px solid #b9cbd3;border-radius:10px;padding:11px 12px;background:#fff;color:#142c36;font:inherit;line-height:1.65;outline:none}
+.instruction-form textarea:focus{border-color:#087da4;box-shadow:0 0 0 3px #087da41c}
+.instruction-meta{display:flex;justify-content:space-between;gap:12px;margin-top:7px;color:#74858c;font-size:11px}
+.instruction-feedback{display:none;margin-top:12px;border-radius:9px;padding:9px 11px;font-size:12px;overflow-wrap:anywhere}
+.instruction-feedback.pending,.instruction-feedback.success,.instruction-feedback.error{display:block}
+.instruction-feedback.pending{background:#edf6fa;color:#28576a;border:1px solid #c7e0ea}
+.instruction-feedback.success{background:#e6f7ed;color:#17633e;border:1px solid #bce4cd}
+.instruction-feedback.error{background:#ffe9e5;color:#8b2418;border:1px solid #ffc8bf}
+.instruction-form .primary:disabled{opacity:.58;cursor:progress}
+@media(max-width:480px){.instruction-meta{flex-direction:column;gap:3px}.instruction-form textarea{min-height:105px}}
