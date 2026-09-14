@@ -44,25 +44,53 @@ def ensure_default_staff_roster(
 ) -> None:
     """Ensure the office always has a real, least-privilege StaffMember per visible seat.
 
-    The bootstrap is additive and idempotent: existing StaffMember records are never
-    overwritten. This keeps the UI functional on an empty ephemeral database while
-    still allowing persistent/custom registry data to take precedence.
+    The bootstrap is additive and idempotent. Existing custom StaffMember records are
+    never overwritten. Existing members created by this default roster are upgraded
+    only with the LOW-risk staff-memory read permission required by the governed
+    reasoning worker.
     """
 
-    existing_staff = {member.staff_id for member in staff.list_all()}
+    existing_by_id = {member.staff_id: member for member in staff.list_all()}
     read_only = Permission(action="read", resource="*", max_risk=RiskLevel.LOW)
+    memory_read = Permission(action="memory.read", resource="staff-memory", max_risk=RiskLevel.LOW)
 
     for spec in DEFAULT_STAFF:
-        if spec.staff_id in existing_staff:
+        expected_role_id = f"role-{spec.staff_id.removeprefix('staff-')}"
+        existing = existing_by_id.get(spec.staff_id)
+        if existing is None:
+            staff.save(
+                StaffMember(
+                    staff_id=spec.staff_id,
+                    display_name=spec.display_name,
+                    role=Role(
+                        role_id=expected_role_id,
+                        name=spec.role_name,
+                        permissions=(read_only, memory_read),
+                    ),
+                )
+            )
+            continue
+
+        if existing.role.role_id != expected_role_id:
+            continue
+        has_memory_read = any(
+            permission.action in {"memory.read", "*"}
+            and permission.resource in {"staff-memory", "*"}
+            and permission.max_risk.severity >= RiskLevel.LOW.severity
+            for permission in existing.role.permissions
+        )
+        if has_memory_read:
             continue
         staff.save(
             StaffMember(
-                staff_id=spec.staff_id,
-                display_name=spec.display_name,
+                staff_id=existing.staff_id,
+                display_name=existing.display_name,
+                status=existing.status,
                 role=Role(
-                    role_id=f"role-{spec.staff_id.removeprefix('staff-')}",
-                    name=spec.role_name,
-                    permissions=(read_only,),
+                    role_id=existing.role.role_id,
+                    name=existing.role.name,
+                    permissions=(*existing.role.permissions, memory_read),
+                    approval_limit=existing.role.approval_limit,
                 ),
             )
         )

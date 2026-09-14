@@ -8,6 +8,7 @@ import urllib.request
 
 import pytest
 
+from nemotron.staff.application.worker_ports import WorkerAnalysis, WorkerAnalysisStatus
 from nemotron.staff.control_plane.config import ControlPlaneConfig
 from nemotron.staff.control_plane.http_api import ControlPlaneHTTPServer
 from nemotron.staff.control_plane.runtime import build_production_runtime
@@ -18,6 +19,18 @@ from nemotron.staff.domain.organization import Department, Organization, StaffPl
 
 EXPECTED_TEAM_IMAGE_SHA256 = "03d56b539bd16258029710d211f55d8419da2818945a0462ccbdf64ce100050a"
 EXPECTED_TEAM_IMAGE_BYTES = 654_489
+
+
+class _UIReasoner:
+    def analyze(self, context):  # type: ignore[no-untyped-def]
+        assert context.visible_memory
+        evidence = context.visible_memory[-1]
+        return WorkerAnalysis(
+            status=WorkerAnalysisStatus.READY,
+            work_summary="UI instruction analyzed.",
+            evidence_memory_ids=(evidence.memory_id,),
+            decision_rationale="تم تحليل التعليمات التجريبية بنجاح.",
+        )
 
 
 def _config(tmp_path) -> ControlPlaneConfig:  # type: ignore[no-untyped-def]
@@ -35,14 +48,17 @@ def _config(tmp_path) -> ControlPlaneConfig:  # type: ignore[no-untyped-def]
 
 def _start_ui(tmp_path):  # type: ignore[no-untyped-def]
     config = _config(tmp_path)
-    runtime = build_production_runtime(config)
+    runtime = build_production_runtime(config, reasoner=_UIReasoner())
     member = StaffMember(
         "staff-ui-1",
         "موظف الاختبار",
         Role(
             "role-ui-1",
             "محلل العمليات",
-            (Permission("read", "github", RiskLevel.LOW),),
+            (
+                Permission("read", "github", RiskLevel.LOW),
+                Permission("memory.read", "staff-memory", RiskLevel.LOW),
+            ),
         ),
     )
     runtime.staff.save(member)
@@ -138,10 +154,7 @@ def test_ui_login_issues_http_only_session_and_projects_real_staff(tmp_path) -> 
             }
         ]
 
-        request = urllib.request.Request(
-            root + "/ui/api/staff/staff-ui-1/workspace",
-            headers={"Cookie": cookie},
-        )
+        request = urllib.request.Request(root + "/ui/api/staff/staff-ui-1/workspace", headers={"Cookie": cookie})
         with urllib.request.urlopen(request, timeout=5) as response:
             workspace = json.load(response)
         assert workspace["placement"]["department_name"] == "العمليات"
@@ -161,7 +174,7 @@ def test_ui_login_issues_http_only_session_and_projects_real_staff(tmp_path) -> 
         thread.join(timeout=2)
 
 
-def test_ui_session_can_queue_instruction_for_selected_staff(tmp_path) -> None:
+def test_ui_session_executes_instruction_for_selected_staff_and_returns_result(tmp_path) -> None:
     config, server, thread, root = _start_ui(tmp_path)
     try:
         cookie, _ = _login(root, config.api_token)
@@ -174,24 +187,22 @@ def test_ui_session_can_queue_instruction_for_selected_staff(tmp_path) -> None:
         )
         with urllib.request.urlopen(request, timeout=5) as response:
             assert response.status == 202
-            queued = json.load(response)
-        assert queued["accepted"] is True
-        assert queued["staff_id"] == "staff-ui-1"
-        assert queued["status"] == "queued"
-        assert queued["work_item_id"]
+            result = json.load(response)
+        assert result["accepted"] is True
+        assert result["staff_id"] == "staff-ui-1"
+        assert result["status"] == "handoff_ready"
+        assert result["execution"]["status"] == "handoff_ready"
+        assert result["execution"]["task_id"]
+        assert result["result"]["text"] == "تم تحليل التعليمات التجريبية بنجاح."
 
-        request = urllib.request.Request(
-            root + "/ui/api/staff/staff-ui-1/workspace",
-            headers={"Cookie": cookie},
-        )
+        request = urllib.request.Request(root + "/ui/api/staff/staff-ui-1/workspace", headers={"Cookie": cookie})
         with urllib.request.urlopen(request, timeout=5) as response:
             workspace = json.load(response)
-        assert len(workspace["queued_work"]) == 1
-        item = workspace["queued_work"][0]
-        assert item["work_item_id"] == queued["work_item_id"]
-        assert item["action"] == "read"
-        assert item["resource"] == "github"
-        assert item["risk"] == "low"
+        assert workspace["queued_work"] == []
+        assert len(workspace["tasks"]) == 1
+        task = workspace["tasks"][0]
+        assert task["task_id"] == result["execution"]["task_id"]
+        assert task["decision"]["rationale"] == "تم تحليل التعليمات التجريبية بنجاح."
     finally:
         server.shutdown()
         server.server_close()

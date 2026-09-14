@@ -83,13 +83,13 @@ function openDrawer(name,role){document.getElementById('employeeName').textConte
 function statusBadge(status){const active=status==='active';return `<span class="status ${active?'':'warn'}"><span class="dot"></span>${active?'نشط':'موقوف'}</span>`;}
 function renderPermissions(items){if(!items?.length)return '<div class="empty">لا توجد صلاحيات مسجلة.</div>';return `<div class="chips">${items.map(p=>`<span class="chip">${esc(p.action)} · ${esc(p.resource)} · ${esc(p.max_risk)}</span>`).join('')}</div>`;}
 function renderQueuedWork(items){if(!items?.length)return '<div class="empty">لا توجد تعليمات في طابور هذا الموظف.</div>';return items.map(item=>`<div class="task"><div class="task-head"><span class="task-title">${esc(item.title)}</span><span class="task-state">${esc(item.status)}</span></div><small>${esc(item.action)} → ${esc(item.resource)} · risk=${esc(item.risk)}<br>${esc(item.work_item_id)}</small></div>`).join('');}
-function renderTasks(items){if(!items?.length)return '<div class="empty">لا توجد مهام محكومة لهذا الموظف حاليًا.</div>';return items.map(t=>`<div class="task"><div class="task-head"><span class="task-title">${esc(t.title)}</span><span class="task-state">${esc(t.state)}</span></div><small>${esc(t.action)} → ${esc(t.resource)} · risk=${esc(t.risk)}<br>${esc(t.task_id)}</small></div>`).join('');}
+function renderTasks(items){if(!items?.length)return '<div class="empty">لا توجد مهام محكومة لهذا الموظف حاليًا.</div>';return items.map(t=>`<div class="task"><div class="task-head"><span class="task-title">${esc(t.title)}</span><span class="task-state">${esc(t.state)}</span></div><small>${esc(t.action)} → ${esc(t.resource)} · risk=${esc(t.risk)}<br>${esc(t.task_id)}</small>${t.decision?.rationale?`<div class="instruction-feedback success">النتيجة: ${esc(t.decision.rationale)}</div>`:''}</div>`).join('');}
 function renderAudit(items){if(!items?.length)return '<div class="empty">لا يوجد نشاط حديث لهذا الموظف.</div>';return items.slice(0,20).map(a=>`<div class="audit"><strong>${esc(a.event_type)}</strong><small>${esc(a.subject_type)} / ${esc(a.subject_id)} · ${fmtTime(a.occurred_at)}</small></div>`).join('');}
 
 function instructionCard(member){return `
   <div class="card instruction-card">
     <h3>إرسال تعليمات إلى الموظف</h3>
-    <p>اكتب المطلوب بوضوح. سترسل الواجهة التعليمات إلى Control Plane وتضعها في طابور هذا الموظف دون تجاوز صلاحياته أو بوابات الموافقة والتنفيذ.</p>
+    <p>اكتب المطلوب بوضوح. سيتم إسناد التعليمات وتشغيل الموظف مباشرة، ثم تظهر النتيجة هنا دون تجاوز صلاحياته أو بوابات الموافقة والتنفيذ.</p>
     <form class="instruction-form" id="instructionForm">
       <label for="instructionText">التعليمات</label>
       <textarea id="instructionText" name="instruction" maxlength="8000" rows="5" required placeholder="مثال: راجع آخر التسويات البنكية وحدد البنود التي تحتاج تحقيقًا إضافيًا."></textarea>
@@ -130,7 +130,7 @@ async function submitInstruction(member,event){
   if(!instruction)return;
   button.disabled=true;
   feedback.className='instruction-feedback pending';
-  feedback.textContent='جاري إرسال التعليمات إلى الـbackend…';
+  feedback.textContent='جاري إسناد التعليمات وتشغيل الموظف…';
   try{
     const result=await api(`/ui/api/staff/${encodeURIComponent(member.staff_id)}/instructions`,{
       method:'POST',
@@ -138,16 +138,20 @@ async function submitInstruction(member,event){
       body:JSON.stringify({instruction})
     });
     input.value='';
-    feedback.className='instruction-feedback success';
-    feedback.textContent=`تم الإسناد بنجاح · ${result.work_item_id}`;
     const data=await api(`/ui/api/staff/${encodeURIComponent(member.staff_id)}/workspace`);
     renderWorkspace(member,data);
     const refreshedFeedback=document.getElementById('instructionFeedback');
-    if(refreshedFeedback){refreshedFeedback.className='instruction-feedback success';refreshedFeedback.textContent=`تم الإسناد بنجاح · ${result.work_item_id}`;}
+    if(refreshedFeedback){
+      const status=result.execution?.status||result.status||'unknown';
+      const text=result.result?.text||result.execution?.detail||'تمت معالجة التعليمات.';
+      const ok=status==='handoff_ready';
+      refreshedFeedback.className=`instruction-feedback ${ok?'success':status==='queued'?'pending':'error'}`;
+      refreshedFeedback.textContent=ok?`تم التنفيذ بنجاح · ${text}`:`حالة التنفيذ: ${status} · ${text}`;
+    }
   }catch(error){
     if(error.message!=='unauthorized'){
       feedback.className='instruction-feedback error';
-      feedback.textContent='تعذر إسناد التعليمات. تحقق من صلاحيات الموظف وحالة Control Plane.';
+      feedback.textContent='تعذر تنفيذ التعليمات. تحقق من صلاحيات الموظف وحالة Control Plane.';
     }
   }finally{button.disabled=false;}
 }
