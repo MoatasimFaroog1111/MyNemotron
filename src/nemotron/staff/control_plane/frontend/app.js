@@ -1,20 +1,20 @@
 const SLOTS=[
-  {x:0,y:53,w:7,h:31,label:'مراقبة العمليات'},
-  {x:6,y:56,w:11,h:37,label:'تحليل البيانات'},
-  {x:14,y:54,w:11,h:39,label:'تطوير الأنظمة'},
-  {x:19,y:39,w:9,h:27,label:'إدارة المشاريع'},
-  {x:24,y:41,w:8,h:26,label:'تجربة المستخدم'},
-  {x:31,y:40,w:10,h:25,label:'تكامل الأنظمة'},
-  {x:41,y:40,w:10,h:26,label:'المحاسبة المالية'},
-  {x:27,y:57,w:10,h:37,label:'الأمن السيبراني'},
-  {x:36,y:58,w:10,h:38,label:'إدارة المحتوى'},
-  {x:56,y:39,w:9,h:27,label:'التحليلات المتقدمة'},
-  {x:46,y:57,w:11,h:39,label:'الذكاء الاصطناعي'},
-  {x:57,y:58,w:10,h:38,label:'إدارة البنية التحتية'},
-  {x:71,y:38,w:10,h:29,label:'إدارة الشبكات'},
-  {x:66,y:57,w:10,h:39,label:'التسويات البنكية'},
-  {x:78,y:55,w:12,h:39,label:'التقارير المالية'},
-  {x:93,y:52,w:7,h:35,label:'دعم العملاء'}
+  {x:0,y:53,w:7,h:31,label:'مراقبة العمليات',staffId:'staff-operations-monitor'},
+  {x:6,y:56,w:11,h:37,label:'تحليل البيانات',staffId:'staff-data-analyst'},
+  {x:14,y:54,w:11,h:39,label:'تطوير الأنظمة',staffId:'staff-systems-developer'},
+  {x:19,y:39,w:9,h:27,label:'إدارة المشاريع',staffId:'staff-project-manager'},
+  {x:24,y:41,w:8,h:26,label:'تجربة المستخدم',staffId:'staff-ux-specialist'},
+  {x:31,y:40,w:10,h:25,label:'تكامل الأنظمة',staffId:'staff-integration-engineer'},
+  {x:41,y:40,w:10,h:26,label:'المحاسبة المالية',staffId:'staff-financial-accountant'},
+  {x:27,y:57,w:10,h:37,label:'الأمن السيبراني',staffId:'staff-cybersecurity'},
+  {x:36,y:58,w:10,h:38,label:'إدارة المحتوى',staffId:'staff-content-manager'},
+  {x:56,y:39,w:9,h:27,label:'التحليلات المتقدمة',staffId:'staff-advanced-analytics'},
+  {x:46,y:57,w:11,h:39,label:'الذكاء الاصطناعي',staffId:'staff-ai-specialist'},
+  {x:57,y:58,w:10,h:38,label:'إدارة البنية التحتية',staffId:'staff-infrastructure-manager'},
+  {x:71,y:38,w:10,h:29,label:'إدارة الشبكات',staffId:'staff-network-manager'},
+  {x:66,y:57,w:10,h:39,label:'التسويات البنكية',staffId:'staff-bank-reconciliation'},
+  {x:78,y:55,w:12,h:39,label:'التقارير المالية',staffId:'staff-financial-reporting'},
+  {x:93,y:52,w:7,h:35,label:'دعم العملاء',staffId:'staff-customer-support'}
 ];
 
 const stage=document.getElementById('stage');
@@ -23,8 +23,12 @@ const workspaceBody=document.getElementById('workspaceBody');
 const login=document.getElementById('login');
 const loginForm=document.getElementById('loginForm');
 const loginError=document.getElementById('loginError');
+const staffCount=document.getElementById('staffCount');
 let zoom=1;
 let staff=[];
+
+document.body.classList.add('lite-mode');
+drawer.style.background='transparent';
 
 function esc(value){return String(value??'').replace(/[&<>'\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','\"':'&quot;'}[c]));}
 function fmtTime(value){if(!value)return '—';try{return new Intl.DateTimeFormat('ar-SA',{dateStyle:'short',timeStyle:'short'}).format(new Date(value));}catch{return String(value);}}
@@ -102,19 +106,29 @@ async function selectStaff(member){
   }catch(error){if(error.message!=='unauthorized')workspaceBody.innerHTML='<div class="error">تعذر تحميل مساحة العمل من Control Plane.</div>';}
 }
 
+function memberForSlot(slot,usedIds){
+  const exact=staff.find(member=>member.staff_id===slot.staffId);
+  if(exact)return exact;
+  const roleMatch=staff.find(member=>!usedIds.has(member.staff_id)&&member.role_name===slot.label);
+  if(roleMatch)return roleMatch;
+  return staff.find(member=>!usedIds.has(member.staff_id))||null;
+}
+
 function buildHotspots(){
   stage.querySelectorAll('.hotspot').forEach(node=>node.remove());
-  SLOTS.forEach((slot,index)=>{
-    const member=staff[index]||null;
+  const usedIds=new Set();
+  SLOTS.forEach(slot=>{
+    const member=memberForSlot(slot,usedIds);
+    if(!member)return;
+    usedIds.add(member.staff_id);
     const button=document.createElement('button');
-    button.type='button';button.className='hotspot'+(member?'':' unassigned');
+    button.type='button';
+    button.className='hotspot';
     button.style.cssText=`--x:${slot.x};--y:${slot.y};--w:${slot.w};--h:${slot.h}`;
-    const name=member?member.display_name:'مقعد غير معيّن';
-    const role=member?member.role_name:slot.label;
-    button.setAttribute('aria-label',`${name} — ${role}`);
-    button.innerHTML=`<span class="tag">${esc(name)} · ${esc(role)}</span>`;
-    if(member)button.onclick=()=>selectStaff(member);
-    else button.onclick=()=>{openDrawer('مقعد غير معيّن',slot.label);workspaceBody.innerHTML='<div class="card"><h3>هذا المقعد غير مربوط</h3><p>لا يوجد StaffMember حقيقي مسجل لهذا الموضع بعد. لن تنشئ الواجهة موظفًا وهميًا تلقائيًا.</p></div>';};
+    button.setAttribute('aria-label',`${member.display_name} — ${member.role_name}`);
+    button.title=`${member.display_name} — ${member.role_name}`;
+    button.innerHTML=`<span class="tag">${esc(member.display_name)} · ${esc(member.role_name)}</span>`;
+    button.onclick=()=>selectStaff(member);
     stage.appendChild(button);
   });
 }
@@ -140,6 +154,7 @@ async function bootstrap(){
   try{
     const response=await api('/ui/api/staff');
     staff=response.items||[];
+    if(staffCount)staffCount.textContent=String(staff.length);
     buildHotspots();
     hideLogin();
   }catch(error){if(error.message!=='unauthorized')showLogin('تعذر الاتصال بواجهة MyNemotron.');}
@@ -154,7 +169,6 @@ const OFFICE_SOURCE_WIDTH=1080;
 const OFFICE_SOURCE_HEIGHT=832;
 const teamImage=document.getElementById('teamImage');
 const connectionState=document.getElementById('connectionState');
-const liteToggle=document.getElementById('liteToggle');
 let officeLayoutFrame=0;
 
 function readSlotValue(node,name){return Number.parseFloat(node.style.getPropertyValue(name))||0;}
@@ -206,12 +220,5 @@ if('ResizeObserver' in window)new ResizeObserver(layoutOfficeHotspots).observe(s
 window.addEventListener('resize',layoutOfficeHotspots,{passive:true});
 window.visualViewport?.addEventListener('resize',layoutOfficeHotspots,{passive:true});
 teamImage?.addEventListener('load',layoutOfficeHotspots,{once:false});
-
-if(liteToggle){
-  liteToggle.addEventListener('click',()=>{
-    const enabled=document.body.classList.toggle('lite-mode');
-    liteToggle.setAttribute('aria-pressed',String(enabled));
-  });
-}
 
 layoutOfficeHotspots();
