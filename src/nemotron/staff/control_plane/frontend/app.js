@@ -1,20 +1,20 @@
 const SLOTS=[
-  {x:0,y:53,w:7,h:31,label:'مراقبة العمليات',staffId:'staff-operations-monitor'},
-  {x:6,y:56,w:11,h:37,label:'تحليل البيانات',staffId:'staff-data-analyst'},
-  {x:14,y:54,w:11,h:39,label:'تطوير الأنظمة',staffId:'staff-systems-developer'},
-  {x:19,y:39,w:9,h:27,label:'إدارة المشاريع',staffId:'staff-project-manager'},
-  {x:24,y:41,w:8,h:26,label:'تجربة المستخدم',staffId:'staff-ux-specialist'},
-  {x:31,y:40,w:10,h:25,label:'تكامل الأنظمة',staffId:'staff-integration-engineer'},
-  {x:41,y:40,w:10,h:26,label:'المحاسبة المالية',staffId:'staff-financial-accountant'},
-  {x:27,y:57,w:10,h:37,label:'الأمن السيبراني',staffId:'staff-cybersecurity'},
-  {x:36,y:58,w:10,h:38,label:'إدارة المحتوى',staffId:'staff-content-manager'},
-  {x:56,y:39,w:9,h:27,label:'التحليلات المتقدمة',staffId:'staff-advanced-analytics'},
-  {x:46,y:57,w:11,h:39,label:'الذكاء الاصطناعي',staffId:'staff-ai-specialist'},
-  {x:57,y:58,w:10,h:38,label:'إدارة البنية التحتية',staffId:'staff-infrastructure-manager'},
-  {x:71,y:38,w:10,h:29,label:'إدارة الشبكات',staffId:'staff-network-manager'},
-  {x:66,y:57,w:10,h:39,label:'التسويات البنكية',staffId:'staff-bank-reconciliation'},
-  {x:78,y:55,w:12,h:39,label:'التقارير المالية',staffId:'staff-financial-reporting'},
-  {x:93,y:52,w:7,h:35,label:'دعم العملاء',staffId:'staff-customer-support'}
+  {x:11.5,y:29.2,w:8.9,h:16.8,label:'مراقبة العمليات',staffId:'staff-operations-monitor'},
+  {x:35.7,y:28.7,w:9.4,h:17,label:'تحليل البيانات',staffId:'staff-data-analyst'},
+  {x:61.4,y:28.1,w:6.3,h:15.3,label:'تطوير الأنظمة',staffId:'staff-systems-developer'},
+  {x:22,y:17,w:7.3,h:26.5,label:'إدارة المشاريع',staffId:'staff-project-manager'},
+  {x:29.6,y:19.2,w:5.5,h:25.9,label:'تجربة المستخدم',staffId:'staff-ux-specialist'},
+  {x:67.9,y:18.8,w:6.9,h:26.3,label:'تكامل الأنظمة',staffId:'staff-integration-engineer'},
+  {x:13.6,y:43.6,w:16.6,h:29.3,label:'المحاسبة المالية',staffId:'staff-financial-accountant'},
+  {x:1.3,y:43.7,w:11.7,h:27.7,label:'الأمن السيبراني',staffId:'staff-cybersecurity'},
+  {x:45.2,y:28.7,w:7,h:15.5,label:'إدارة المحتوى',staffId:'staff-content-manager'},
+  {x:52.7,y:29.9,w:8.7,h:16.1,label:'التحليلات المتقدمة',staffId:'staff-advanced-analytics'},
+  {x:32.3,y:45.8,w:14.8,h:26.9,label:'الذكاء الاصطناعي',staffId:'staff-ai-specialist'},
+  {x:87.7,y:29.9,w:12.3,h:14.5,label:'إدارة البنية التحتية',staffId:'staff-infrastructure-manager'},
+  {x:75.2,y:29.9,w:8.4,h:16.4,label:'إدارة الشبكات',staffId:'staff-network-manager'},
+  {x:51,y:46.2,w:15,h:25.5,label:'التسويات البنكية',staffId:'staff-bank-reconciliation'},
+  {x:70.9,y:46.5,w:13.3,h:24.3,label:'التقارير المالية',staffId:'staff-financial-reporting'},
+  {x:85.9,y:44.8,w:14.1,h:28.3,label:'دعم العملاء',staffId:'staff-customer-support'}
 ];
 
 const stage=document.getElementById('stage');
@@ -164,9 +164,9 @@ bootstrap();
 
 // Full-screen office projection. The image uses object-fit: cover, so the
 // visible origin changes with the viewport. Re-project every percentage slot
-// from the stable 1080x832 coordinate system into the covered viewport.
-const OFFICE_SOURCE_WIDTH=1080;
-const OFFICE_SOURCE_HEIGHT=832;
+// from the native 1672x941 daylight image into the covered viewport.
+const OFFICE_SOURCE_WIDTH=1672;
+const OFFICE_SOURCE_HEIGHT=941;
 const teamImage=document.getElementById('teamImage');
 const connectionState=document.getElementById('connectionState');
 let officeLayoutFrame=0;

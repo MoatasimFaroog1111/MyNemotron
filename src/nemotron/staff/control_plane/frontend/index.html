@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#031017">
   <title>مكتب الذكاء الاصطناعي | MyNemotron</title>
-  <link rel="stylesheet" href="/ui/app.css">
+  <link rel="stylesheet" href="/ui/app.css?v=office-daylight-v2">
 </head>
 <body class="lite-mode">
 <a class="skip-link" href="#officeMain">تخطَّ إلى المكتب</a>
@@ -32,7 +32,7 @@
     </section>
     <div class="stage-shell">
       <div class="stage" id="stage" aria-label="المكتب التفاعلي">
-        <img src="/ui/team-original.jpg?v=20260914-hq1" width="1080" height="832" alt="فريق موظفين داخل غرفة عمليات رقمية أمام خريطة عالمية" id="teamImage" draggable="false">
+        <img src="/ui/office-daylight-v2.jpg" width="1672" height="941" alt="ستة عشر موظفًا رقميًا في مشهد مكتب بأسلوب فوتوغرافي وإضاءة نهارية طبيعية" id="teamImage" draggable="false" fetchpriority="high">
         <div class="office-status" aria-hidden="true"><span>ACTIVE STAFF</span><b id="staffCount">0</b><small>WORKSPACES</small></div>
       </div>
     </div>
@@ -41,6 +41,6 @@
 <div class="hint"><span class="hint-pulse"></span><strong>التوجيه:</strong> اضغط على أي موظف لفتح مساحة عمله.</div>
 <div class="drawer" id="drawer" aria-hidden="true"><section class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="employeeName"><div class="drawer-head"><div><span class="drawer-kicker">AGENT WORKSPACE</span><strong id="employeeName">الموظف</strong><small id="employeeRole"></small></div><button class="close" id="close" aria-label="إغلاق" type="button">×</button></div><div class="workspace" id="workspaceBody"></div></section></div>
 <div class="login" id="login" aria-hidden="true"><form class="login-card" id="loginForm"><svg class="login-mark" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="24"/><path d="M15 32h10l6-13 8 26 6-13h7"/><circle cx="32" cy="32" r="6"/></svg><span class="eyebrow">SECURE CONTROL PLANE</span><h1>MyNemotron Staff OS</h1><p>أدخل مفتاح الوصول. يستبدله الخادم بجلسة HttpOnly آمنة ولا يُحفظ في المتصفح.</p><label for="accessToken">مفتاح الوصول</label><input id="accessToken" name="accessToken" type="password" autocomplete="current-password" required><button class="primary login-submit" type="submit">بدء الجلسة الآمنة</button><div class="error login-error" id="loginError"></div></form></div>
-<script src="/ui/app.js" defer></script>
+<script src="/ui/app.js?v=office-daylight-v2" defer></script>
 </body>
 </html>

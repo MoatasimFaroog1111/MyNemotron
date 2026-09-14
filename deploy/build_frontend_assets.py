@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-import base64
-import binascii
 import hashlib
 from pathlib import Path
 
-EXPECTED_PART_COUNT = 18
-EXPECTED_SHA256 = "2456fa2e68961690b6cd67b83e6bf9875f7bbe5e8d1a90127006eeb7147a3d4f"
-EXPECTED_BYTES = 25_818
-PARTS_DIR_NAME = "team-image-hq"
+EXPECTED_SHA256 = "03d56b539bd16258029710d211f55d8419da2818945a0462ccbdf64ce100050a"
+EXPECTED_BYTES = 654_489
+IMAGE_FILENAME = "office-daylight-v2.jpg"
 
 
 def _project_root() -> Path:
@@ -16,6 +13,7 @@ def _project_root() -> Path:
 
 
 def build_team_image() -> Path:
+    """Verify the committed photo without replacing it with a legacy thumbnail."""
     frontend_root = (
         _project_root()
         / "src"
@@ -24,23 +22,8 @@ def build_team_image() -> Path:
         / "control_plane"
         / "frontend"
     )
-    parts_dir = frontend_root / PARTS_DIR_NAME
-    expected_names = [f"part-{index:02d}.b64" for index in range(EXPECTED_PART_COUNT)]
-    actual_names = sorted(path.name for path in parts_dir.glob("part-*.b64"))
-    if actual_names != expected_names:
-        raise RuntimeError(
-            "Incomplete deterministic team-image package: "
-            f"expected {EXPECTED_PART_COUNT} parts, found {len(actual_names)}."
-        )
-
-    encoded = "".join(
-        "".join((parts_dir / name).read_text(encoding="ascii").split())
-        for name in expected_names
-    )
-    try:
-        image = base64.b64decode(encoded, validate=True)
-    except (binascii.Error, ValueError) as exc:
-        raise RuntimeError("Team-image package is not valid Base64.") from exc
+    destination = frontend_root / IMAGE_FILENAME
+    image = destination.read_bytes()
 
     if len(image) != EXPECTED_BYTES:
         raise RuntimeError(
@@ -55,11 +38,7 @@ def build_team_image() -> Path:
             f"Team-image checksum mismatch: expected {EXPECTED_SHA256}, got {digest}."
         )
 
-    destination = frontend_root / "team-original.jpg"
-    temporary = destination.with_suffix(".jpg.tmp")
-    temporary.write_bytes(image)
-    temporary.replace(destination)
-    print(f"Built {destination} ({len(image)} bytes, sha256={digest})")
+    print(f"Verified {destination} ({len(image)} bytes, sha256={digest})")
     return destination
 
 

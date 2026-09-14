@@ -34,9 +34,9 @@ def test_official_frontend_has_responsive_contract() -> None:
     assert "drawer.style.background='transparent'" in js
 
     # Cover crops the source image differently per viewport. Hotspots therefore
-    # must be re-projected from the stable 1080x832 source coordinate system.
-    assert "OFFICE_SOURCE_WIDTH=1080" in js
-    assert "OFFICE_SOURCE_HEIGHT=832" in js
+    # must be re-projected from the native daylight photo coordinate system.
+    assert "OFFICE_SOURCE_WIDTH=1672" in js
+    assert "OFFICE_SOURCE_HEIGHT=941" in js
     assert "Math.max(width/OFFICE_SOURCE_WIDTH,height/OFFICE_SOURCE_HEIGHT)" in js
     assert "offsetX=(width-renderedWidth)/2" in js
     assert "offsetY=(height-renderedHeight)/2" in js
