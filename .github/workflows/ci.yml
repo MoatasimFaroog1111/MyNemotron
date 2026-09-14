@@ -34,6 +34,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install ruff pytest
 
+      - name: Build verified frontend assets
+        run: python deploy/build_frontend_assets.py
+
       - name: Python syntax check
         run: python -m compileall -q src tests deploy
 
