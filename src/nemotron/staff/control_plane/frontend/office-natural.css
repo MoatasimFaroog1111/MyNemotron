@@ -1,0 +1,58 @@
+.stage img{
+  filter:none!important;
+}
+
+.cinematic-grade,
+.grid-field,
+.scanline,
+.network-layer{
+  display:none!important;
+}
+
+.drawer{
+  background:transparent!important;
+}
+
+.drawer-panel{
+  box-shadow:-12px 0 36px #0005!important;
+}
+
+.office-intro{
+  background:#ffffffdc!important;
+  color:#10252f!important;
+  border-color:#ffffffb8!important;
+  box-shadow:0 10px 28px #0003!important;
+  backdrop-filter:blur(7px)!important;
+  -webkit-backdrop-filter:blur(7px)!important;
+}
+
+.office-intro .eyebrow{
+  color:#087da4!important;
+}
+
+.office-intro p{
+  color:#395964!important;
+}
+
+.hotspot::before{
+  opacity:1!important;
+  background:#00bdf2!important;
+  box-shadow:0 0 0 4px #ffffffcc,0 0 16px #00bdf2!important;
+}
+
+.hotspot:hover,
+.hotspot:focus-visible{
+  border-color:#00c8ff!important;
+  background:#00bdf21f!important;
+}
+
+@media(max-width:780px){
+  .office-intro{
+    top:68px!important;
+    right:10px!important;
+    max-width:calc(100vw - 20px)!important;
+    padding:9px 11px!important;
+  }
+  .office-intro h1{font-size:17px!important}
+  .office-intro p{font-size:11px!important}
+}
