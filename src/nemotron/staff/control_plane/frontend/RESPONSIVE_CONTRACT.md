@@ -1,14 +1,12 @@
-# Official Staff OS responsive contract
+# Responsive Contract
 
-The official browser UI is a Presentation/BFF surface over the Control Plane. It must remain usable on desktop, tablet, mobile, narrow mobile, and short landscape viewports without changing the 1080x832 image coordinate system used by percentage-based staff hotspots.
+The official MyNemotron Staff OS frontend is responsive by contract, not by visual convention.
 
-Acceptance requirements are enforced in `tests/staff_core/test_frontend_responsive_contract.py`:
-
-- mobile viewport metadata
-- stable `1080/832` stage aspect ratio
-- no page-level horizontal overflow
-- safe-area support
-- explicit tablet/mobile/narrow-mobile/landscape breakpoints
-- reduced-motion accessibility
-
-The browser remains read-only for sensitive actions and must never receive provider credentials or the long-lived Control Plane bearer token after session establishment.
+- The canonical hotspot coordinate system is always 1080 × 832.
+- The team image may be web-optimized, but it is rendered inside that canonical aspect ratio.
+- Hotspots use percentage coordinates so they remain aligned across viewport sizes.
+- Desktop, tablet, mobile, narrow-mobile, and landscape breakpoints are explicit.
+- The layout must never introduce horizontal page overflow.
+- Safe-area insets are respected on mobile devices.
+- Motion is reduced when the operating system requests `prefers-reduced-motion`.
+- Sensitive actions remain outside the browser UI until explicit human identity, authorization, CSRF, and audit controls are proven.
