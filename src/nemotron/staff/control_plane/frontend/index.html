@@ -2,54 +2,51 @@
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>فريق العمل التفاعلي | MyNemotron</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#031017">
+  <title>مكتب الذكاء الاصطناعي | MyNemotron</title>
   <link rel="stylesheet" href="/ui/app.css">
 </head>
 <body>
+<a class="skip-link" href="#officeMain">تخطَّ إلى المكتب</a>
 <div class="app">
-  <header>
-    <div class="brand"><span class="logo" aria-hidden="true">◎</span><span>فريق العمل التفاعلي</span></div>
+  <header class="topbar">
+    <div class="brand" aria-label="MyNemotron Staff OS">
+      <svg class="brand-mark" viewBox="0 0 36 36" role="img" aria-label="شعار MyNemotron"><circle cx="18" cy="18" r="13"/><path d="M9 18h5l3-6 4 12 3-6h4"/><circle cx="18" cy="18" r="3"/></svg>
+      <div><strong>MyNemotron</strong><span>فريق العمل التفاعلي · AI STAFF OS</span></div>
+    </div>
+    <div class="system-state" aria-label="حالة النظام"><i></i><span>CONTROL PLANE</span><b>متصل</b></div>
     <div class="tools">
       <button class="tool dashboard" id="overviewBtn" type="button">لوحة التحكم</button>
-      <button class="tool" id="minus" aria-label="تصغير" type="button">−</button>
-      <span id="zoomText">100%</span>
-      <button class="tool" id="plus" aria-label="تكبير" type="button">+</button>
+      <button class="tool icon-tool" id="soundToggle" aria-label="تبديل صوت الواجهة" aria-pressed="false" type="button">◖</button>
+      <button class="tool icon-tool" id="liteToggle" aria-label="تبديل الوضع الخفيف" aria-pressed="false" type="button">◇</button>
+      <button class="tool icon-tool" id="minus" aria-label="تصغير" type="button">−</button>
+      <span id="zoomText" aria-live="polite">100%</span>
+      <button class="tool icon-tool" id="plus" aria-label="تكبير" type="button">+</button>
       <button class="tool" id="fit" aria-label="إعادة الحجم" type="button">ملاءمة</button>
       <button class="tool logout" id="logout" type="button">خروج</button>
     </div>
   </header>
-  <main>
+  <main id="officeMain">
+    <section class="office-intro" aria-labelledby="officeTitle">
+      <div><span class="eyebrow">NEMOTRON OPERATIONS NETWORK</span><h1 id="officeTitle">مكتب الذكاء الاصطناعي</h1></div>
+      <p>اختر موظفاً رقمياً لفتح مساحة عمله المحكومة داخل Control Plane.</p>
+    </section>
     <div class="stage-shell">
-      <div class="stage" id="stage">
-        <img src="/ui/team-original.jpg" width="1080" height="832" alt="فريق من الموظفين في غرفة عمليات أمام خريطة عالمية" id="teamImage">
+      <div class="stage" id="stage" aria-label="المكتب التفاعلي">
+        <img src="/ui/team-original.jpg" width="1080" height="832" alt="فريق موظفين داخل غرفة عمليات رقمية أمام خريطة عالمية" id="teamImage" draggable="false">
+        <div class="cinematic-grade" aria-hidden="true"></div>
+        <div class="grid-field" aria-hidden="true"></div>
+        <div class="scanline" aria-hidden="true"></div>
+        <svg class="network-layer" viewBox="0 0 1080 832" preserveAspectRatio="none" aria-hidden="true"><path d="M72 590 Q250 420 470 510 T1010 420"/><path d="M190 610 Q390 340 560 470 T920 580"/><circle cx="470" cy="510" r="4"/><circle cx="760" cy="475" r="4"/><circle cx="920" cy="580" r="4"/></svg>
+        <div class="office-status" aria-hidden="true"><span>LIVE NETWORK</span><b>16</b><small>AGENT NODES</small></div>
       </div>
     </div>
   </main>
 </div>
-<div class="hint"><strong>طريقة الاستخدام:</strong> اضغط على أي موظف لفتح مساحة عمله الحقيقية في MyNemotron.</div>
-
-<div class="drawer" id="drawer" aria-hidden="true">
-  <section class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="employeeName">
-    <div class="drawer-head">
-      <div><strong id="employeeName">الموظف</strong><small id="employeeRole"></small></div>
-      <button class="close" id="close" aria-label="إغلاق" type="button">×</button>
-    </div>
-    <div class="workspace" id="workspaceBody"></div>
-  </section>
-</div>
-
-<div class="login" id="login" aria-hidden="true">
-  <form class="login-card" id="loginForm">
-    <div class="logo login-logo" aria-hidden="true">◎</div>
-    <h1>MyNemotron Staff OS</h1>
-    <p>أدخل مفتاح الوصول إلى Control Plane مرة واحدة. لن يُحفظ المفتاح في JavaScript أو Local Storage؛ الخادم سيستبدله بجلسة HttpOnly آمنة.</p>
-    <label for="accessToken">مفتاح الوصول</label>
-    <input id="accessToken" name="accessToken" type="password" autocomplete="current-password" required>
-    <button class="primary login-submit" type="submit">دخول</button>
-    <div class="error login-error" id="loginError"></div>
-  </form>
-</div>
+<div class="hint"><span class="hint-pulse"></span><strong>التوجيه:</strong> مرّر المؤشر أو اضغط على أحد الموظفين.</div>
+<div class="drawer" id="drawer" aria-hidden="true"><section class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="employeeName"><div class="drawer-head"><div><span class="drawer-kicker">AGENT WORKSPACE</span><strong id="employeeName">الموظف</strong><small id="employeeRole"></small></div><button class="close" id="close" aria-label="إغلاق" type="button">×</button></div><div class="workspace" id="workspaceBody"></div></section></div>
+<div class="login" id="login" aria-hidden="true"><form class="login-card" id="loginForm"><svg class="login-mark" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="24"/><path d="M15 32h10l6-13 8 26 6-13h7"/><circle cx="32" cy="32" r="6"/></svg><span class="eyebrow">SECURE CONTROL PLANE</span><h1>MyNemotron Staff OS</h1><p>أدخل مفتاح الوصول. يستبدله الخادم بجلسة HttpOnly آمنة ولا يُحفظ في المتصفح.</p><label for="accessToken">مفتاح الوصول</label><input id="accessToken" name="accessToken" type="password" autocomplete="current-password" required><button class="primary login-submit" type="submit">بدء الجلسة الآمنة</button><div class="error login-error" id="loginError"></div></form></div>
 <script src="/ui/app.js" defer></script>
 </body>
 </html>
