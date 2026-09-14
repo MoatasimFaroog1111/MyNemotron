@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from nemotron.staff.application.ports import AuditPort, ClockPort, GovernanceAuditEvent, IdGeneratorPort, OrganizationRepository, StaffRepository
 from nemotron.staff.application.runtime_ports import GoalRepository, PlanRepository, WorkQueueRepository
-from nemotron.staff.domain import RiskLevel
+from nemotron.staff.domain import PermissionDenied, RiskLevel
 from nemotron.staff.domain.runtime import Goal, PlanProposal, PlanStep, WorkItem
 
 
@@ -18,9 +18,9 @@ class SubmitDirectInstructionRequest:
 class SubmitDirectInstruction:
     """Queue one low-risk instruction for a selected staff member.
 
-    This adapter intentionally creates a governed Goal -> accepted Plan -> WorkItem
-    chain instead of bypassing Staff Core. The worker still performs reasoning and
-    all external side effects remain subject to the existing tool/approval gates.
+    This creates a governed Goal -> accepted Plan -> WorkItem chain rather than
+    bypassing Staff Core. The instruction receives only an existing low-risk read
+    permission from the selected staff member; it never grants new tool authority.
     """
 
     def __init__(
@@ -66,10 +66,21 @@ class SubmitDirectInstruction:
         if organization is None or placement is None:
             raise LookupError(request.staff_id)
 
-        # The browser instruction is deliberately analysis-only. It grants no
-        # external tool authority. A later governed flow must prepare/approve
-        # any concrete side effect separately.
-        member.assert_allowed("read", "*", RiskLevel.LOW)
+        authority = next(
+            (
+                permission
+                for permission in member.role.permissions
+                if permission.action in {"read", "*"}
+                and permission.max_risk.severity >= RiskLevel.LOW.severity
+            ),
+            None,
+        )
+        if authority is None:
+            raise PermissionDenied("Selected staff member has no low-risk read authority for UI instructions.")
+        action = "read"
+        resource = authority.resource
+        member.assert_allowed(action, resource, RiskLevel.LOW)
+
         now = self._clock.now()
         goal_id = self._ids.new_id()
         proposal_id = self._ids.new_id()
@@ -92,8 +103,8 @@ class SubmitDirectInstruction:
         step = PlanStep(
             step_id=step_id,
             title=title,
-            action="read",
-            resource="*",
+            action=action,
+            resource=resource,
             risk=RiskLevel.LOW,
             department_id=placement.department_id,
         )
@@ -105,6 +116,7 @@ class SubmitDirectInstruction:
             summary="Direct UI instruction queued for governed staff reasoning.",
             steps=(step,),
             created_at=now,
+            version=2,
             accepted_at=now,
         )
         self._plans.save(proposal)
@@ -116,8 +128,8 @@ class SubmitDirectInstruction:
             proposal_id=proposal_id,
             step_id=step_id,
             title=title,
-            action="read",
-            resource="*",
+            action=action,
+            resource=resource,
             risk=RiskLevel.LOW,
             assigned_staff_id=request.staff_id,
             created_at=now,
