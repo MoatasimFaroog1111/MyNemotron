@@ -25,7 +25,7 @@ _UI_ASSETS = {
     "/ui/index.html": "index.html",
     "/ui/app.css": "app.css",
     "/ui/app.js": "app.js",
-    "/ui/team-original.jpg": "team-original.jpg",
+    "/ui/office-daylight-v2.jpg": "office-daylight-v2.jpg",
 }
 
 
@@ -232,7 +232,7 @@ class ControlPlaneRequestHandler(BaseHTTPRequestHandler):
             self._write_json(HTTPStatus.NOT_FOUND, {"error": "ui_asset_missing"})
             return True
         body = asset.read_bytes()
-        if filename == "team-original.jpg" and (
+        if filename == "office-daylight-v2.jpg" and (
             not body.startswith(b"\xff\xd8\xff") or not body.endswith(b"\xff\xd9")
         ):
             raise ValueError("Packaged team image failed JPEG signature validation.")
