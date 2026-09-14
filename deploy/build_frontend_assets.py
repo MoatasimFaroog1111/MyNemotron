@@ -5,7 +5,7 @@ import binascii
 import hashlib
 from pathlib import Path
 
-EXPECTED_PART_COUNT = 12
+EXPECTED_PART_COUNT = 21
 EXPECTED_SHA256 = "0d768106d4066439080857a7fc50ec380755769b2019285bb2bdb8f9af545db5"
 MIN_JPEG_BYTES = 40_000
 
