@@ -12,7 +12,7 @@ from .runtime import ProductionRuntime
 
 
 class ControlPlaneService:
-    """Application-facing control surface. HTTP is only an adapter over this service."""
+    """Application-facing control surface. HTTP and the browser UI are adapters over this service."""
 
     def __init__(self, runtime: ProductionRuntime) -> None:
         self.runtime = runtime
@@ -34,6 +34,87 @@ class ControlPlaneService:
 
     def task(self, task_id: str) -> dict[str, Any]:
         return self.runtime.queries.task(task_id)
+
+    def staff_directory(self) -> list[dict[str, Any]]:
+        """Return safe Staff Registry metadata for the official UI; never return secrets or tool handles."""
+        return [
+            {
+                "staff_id": member.staff_id,
+                "display_name": member.display_name,
+                "status": member.status.value,
+                "role_id": member.role.role_id,
+                "role_name": member.role.name,
+                "approval_limit": member.role.approval_limit.value if member.role.approval_limit else None,
+            }
+            for member in self.runtime.staff.list_all()
+        ]
+
+    def _placement_for(self, staff_id: str) -> dict[str, Any] | None:
+        for organization in self.runtime.organizations.list_all():
+            try:
+                placement = organization.placement_for(staff_id)
+            except LookupError:
+                continue
+            department = organization.department_for(staff_id)
+            return {
+                "organization_id": organization.organization_id,
+                "organization_name": organization.name,
+                "department_id": department.department_id,
+                "department_name": department.name,
+                "job_title": placement.job_title,
+                "manager_id": placement.manager_id,
+                "chief_of_staff": organization.chief_of_staff_id == staff_id,
+            }
+        return None
+
+    def staff_workspace(self, staff_id: str) -> dict[str, Any]:
+        """Read-only staff workspace projection used by the browser BFF surface."""
+        member = self.runtime.staff.get(staff_id)
+        tasks = [
+            self.runtime.queries.task_to_dict(task)
+            for task in self.runtime.tasks.list_all()
+            if task.assignee_id == staff_id
+        ]
+        task_ids = {item["task_id"] for item in tasks}
+        audit = []
+        for item in self.runtime.audit.list_recent(limit=250):
+            if item.actor_id == staff_id or (item.subject_type == "task" and item.subject_id in task_ids):
+                audit.append(
+                    {
+                        **asdict(item),
+                        "occurred_at": item.occurred_at.isoformat(),
+                    }
+                )
+            if len(audit) >= 40:
+                break
+        return {
+            "staff_id": member.staff_id,
+            "display_name": member.display_name,
+            "status": member.status.value,
+            "role_id": member.role.role_id,
+            "role_name": member.role.name,
+            "approval_limit": member.role.approval_limit.value if member.role.approval_limit else None,
+            "permissions": [
+                {
+                    "action": permission.action,
+                    "resource": permission.resource,
+                    "max_risk": permission.max_risk.value,
+                }
+                for permission in member.role.permissions
+            ],
+            "placement": self._placement_for(staff_id),
+            "tasks": tasks,
+            "audit": audit,
+        }
+
+    def ui_overview(self) -> dict[str, Any]:
+        """Safe read-only operational summary for the official frontend."""
+        return {
+            "health": self.health(),
+            "approvals": self.approval_inbox(),
+            "executions": self.execution_dashboard(),
+            "audit": self.audit_timeline(limit=80),
+        }
 
     def audit_timeline(
         self,
