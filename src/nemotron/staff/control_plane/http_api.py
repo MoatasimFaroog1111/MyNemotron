@@ -24,6 +24,7 @@ _UI_ASSETS = {
     "/ui/": "index.html",
     "/ui/index.html": "index.html",
     "/ui/app.css": "app.css",
+    "/ui/instructions.css": "instructions.css",
     "/ui/app.js": "app.js",
     "/ui/office-daylight-v2.jpg": "office-daylight-v2.jpg",
 }
