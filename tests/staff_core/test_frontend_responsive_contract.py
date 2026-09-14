@@ -27,6 +27,12 @@ def test_official_frontend_has_responsive_contract() -> None:
     assert "object-fit:cover" in css
     assert "overflow:hidden" in css
 
+    # Natural rendering is the default: the decorative 2.5D filter stack must
+    # not make the real office scene dark or synthetic.
+    assert '<body class="lite-mode">' in html
+    assert "document.body.classList.add('lite-mode')" in js
+    assert "drawer.style.background='transparent'" in js
+
     # Cover crops the source image differently per viewport. Hotspots therefore
     # must be re-projected from the stable 1080x832 source coordinate system.
     assert "OFFICE_SOURCE_WIDTH=1080" in js
@@ -35,7 +41,12 @@ def test_official_frontend_has_responsive_contract() -> None:
     assert "offsetX=(width-renderedWidth)/2" in js
     assert "offsetY=(height-renderedHeight)/2" in js
 
-    # Person buttons remain wired to the real governed Staff workspace API.
+    # Every visible office button must resolve to a real StaffMember workspace;
+    # unassigned fake-seat drawers are not allowed.
+    assert js.count("staffId:'staff-") == 16
+    assert "memberForSlot" in js
+    assert "if(!member)return" in js
+    assert "مقعد غير معيّن" not in js
     assert "/ui/api/staff/${encodeURIComponent(member.staff_id)}/workspace" in js
 
     # Safe-area support keeps controls usable on notched mobile devices.
