@@ -82,11 +82,17 @@ def test_official_frontend_is_same_origin_and_api_token_is_not_embedded(tmp_path
             csp = response.headers["Content-Security-Policy"]
         assert "مكتب الذكاء الاصطناعي" in html
         assert "/ui/app.js" in html
+        assert "/ui/instructions.css" in html
         assert "/ui/office-daylight-v2.jpg" in html
         assert 'width="1672" height="941"' in html
         assert config.api_token not in html
         assert "script-src 'self'" in csp
         assert "frame-ancestors 'none'" in csp
+
+        with urllib.request.urlopen(root + "/ui/instructions.css", timeout=5) as response:
+            css = response.read().decode("utf-8")
+            assert response.headers["Content-Type"] == "text/css"
+        assert ".instruction-form" in css
 
         with urllib.request.urlopen(root + "/ui/office-daylight-v2.jpg", timeout=5) as response:
             image = response.read()
@@ -140,6 +146,7 @@ def test_ui_login_issues_http_only_session_and_projects_real_staff(tmp_path) -> 
             workspace = json.load(response)
         assert workspace["placement"]["department_name"] == "العمليات"
         assert workspace["permissions"][0]["resource"] == "github"
+        assert workspace["queued_work"] == []
         assert workspace["tasks"] == []
 
         name, value = cookie.split("=", 1)
@@ -148,6 +155,43 @@ def test_ui_login_issues_http_only_session_and_projects_real_staff(tmp_path) -> 
         with pytest.raises(urllib.error.HTTPError) as exc_info:
             urllib.request.urlopen(request, timeout=5)
         assert exc_info.value.code == 401
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_ui_session_can_queue_instruction_for_selected_staff(tmp_path) -> None:
+    config, server, thread, root = _start_ui(tmp_path)
+    try:
+        cookie, _ = _login(root, config.api_token)
+        body = json.dumps({"instruction": "راجع بيانات GitHub وحدد ما يحتاج متابعة."}, ensure_ascii=False).encode("utf-8")
+        request = urllib.request.Request(
+            root + "/ui/api/staff/staff-ui-1/instructions",
+            data=body,
+            headers={"Cookie": cookie, "Content-Type": "application/json", "Accept": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            assert response.status == 202
+            queued = json.load(response)
+        assert queued["accepted"] is True
+        assert queued["staff_id"] == "staff-ui-1"
+        assert queued["status"] == "queued"
+        assert queued["work_item_id"]
+
+        request = urllib.request.Request(
+            root + "/ui/api/staff/staff-ui-1/workspace",
+            headers={"Cookie": cookie},
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            workspace = json.load(response)
+        assert len(workspace["queued_work"]) == 1
+        item = workspace["queued_work"][0]
+        assert item["work_item_id"] == queued["work_item_id"]
+        assert item["action"] == "read"
+        assert item["resource"] == "github"
+        assert item["risk"] == "low"
     finally:
         server.shutdown()
         server.server_close()

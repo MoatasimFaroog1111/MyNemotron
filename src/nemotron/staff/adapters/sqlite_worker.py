@@ -32,6 +32,14 @@ class SQLiteWorkerQueue:
                 )"""
             )
 
+    def enqueue(self, item: WorkItem) -> None:
+        """Delegate durable queue insertion to the runtime store."""
+        self.store.enqueue(item)
+
+    def inbox(self, staff_id: str) -> tuple[WorkItem, ...]:
+        """Return queued/claimed work using the runtime store projection."""
+        return self.store.inbox(staff_id)
+
     def claim_next(self, staff_id: str, *, at: datetime) -> WorkItem | None:
         db = self._connect()
         try:

@@ -24,6 +24,7 @@ _UI_ASSETS = {
     "/ui/": "index.html",
     "/ui/index.html": "index.html",
     "/ui/app.css": "app.css",
+    "/ui/instructions.css": "instructions.css",
     "/ui/app.js": "app.js",
     "/ui/office-daylight-v2.jpg": "office-daylight-v2.jpg",
 }
@@ -380,6 +381,22 @@ class ControlPlaneRequestHandler(BaseHTTPRequestHandler):
                     {"authenticated": False},
                     extra_headers={"Set-Cookie": self.server.ui_sessions.clear_cookie_header()},
                 )
+                return
+            if parsed.path.startswith("/ui/api/staff/") and parsed.path.endswith("/instructions"):
+                if not self._require_ui_auth():
+                    return
+                if not self._request_origin_allowed():
+                    self._write_json(HTTPStatus.FORBIDDEN, {"error": "origin_rejected"})
+                    return
+                if not self._rate_limit("ui-write", limit=self._config.api_write_rpm):
+                    return
+                staff_id = unquote(parsed.path[len("/ui/api/staff/") : -len("/instructions")].strip("/"))
+                if not staff_id or "/" in staff_id:
+                    raise ValueError("Invalid staff id.")
+                payload = self._read_json()
+                instruction = str(payload.get("instruction", ""))
+                result = self.server.service.submit_staff_instruction(staff_id, instruction)
+                self._write_json(HTTPStatus.ACCEPTED, result)
                 return
 
             if not self._require_auth():

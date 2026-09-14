@@ -4,6 +4,7 @@ import secrets
 from dataclasses import asdict
 from typing import Any, Mapping
 
+from nemotron.staff.application.direct_instructions import SubmitDirectInstructionRequest
 from nemotron.staff.application.ports import GovernanceAuditEvent
 from nemotron.staff.application.tool_gateway import PrepareToolExecutionRequest
 from nemotron.staff.domain import PermissionDenied
@@ -68,12 +69,25 @@ class ControlPlaneService:
         return None
 
     def staff_workspace(self, staff_id: str) -> dict[str, Any]:
-        """Read-only staff workspace projection used by the browser BFF surface."""
         member = self.runtime.staff.get(staff_id)
         tasks = [
             self.runtime.queries.task_to_dict(task)
             for task in self.runtime.tasks.list_all()
             if task.assignee_id == staff_id
+        ]
+        queued = [
+            {
+                "work_item_id": item.work_item_id,
+                "goal_id": item.goal_id,
+                "title": item.title,
+                "action": item.action,
+                "resource": item.resource,
+                "risk": item.risk.value,
+                "status": item.status.value,
+                "created_at": item.created_at.isoformat(),
+                "result_summary": item.result_summary,
+            }
+            for item in self.runtime.worker_queue.inbox(staff_id)
         ]
         task_ids = {item["task_id"] for item in tasks}
         audit = []
@@ -103,12 +117,29 @@ class ControlPlaneService:
                 for permission in member.role.permissions
             ],
             "placement": self._placement_for(staff_id),
+            "queued_work": queued,
             "tasks": tasks,
             "audit": audit,
         }
 
+    def submit_staff_instruction(self, staff_id: str, instruction: str) -> dict[str, Any]:
+        item = self.runtime.submit_direct_instruction(
+            SubmitDirectInstructionRequest(
+                staff_id=staff_id,
+                instruction=instruction,
+            )
+        )
+        return {
+            "accepted": True,
+            "staff_id": item.assigned_staff_id,
+            "work_item_id": item.work_item_id,
+            "goal_id": item.goal_id,
+            "status": item.status.value,
+            "title": item.title,
+        }
+
     def ui_overview(self) -> dict[str, Any]:
-        """Safe read-only operational summary for the official frontend."""
+        """Safe operational summary for the official frontend."""
         return {
             "health": self.health(),
             "approvals": self.approval_inbox(),

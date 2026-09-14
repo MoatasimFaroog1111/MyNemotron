@@ -45,6 +45,7 @@ from nemotron.staff.adapters.tools import (
     github_tool_definition,
     odoo_tool_definition,
 )
+from nemotron.staff.application.direct_instructions import SubmitDirectInstruction
 from nemotron.staff.application.goals import CreateGoal
 from nemotron.staff.application.memory import ReadVisibleMemory, WriteMemory
 from nemotron.staff.application.planning import AcceptPlan, BuildPlanProposal
@@ -95,6 +96,7 @@ class ProductionRuntime:
     planner: PlanningPort
     reasoner: WorkerReasoningPort
     create_goal: CreateGoal
+    submit_direct_instruction: SubmitDirectInstruction
     write_memory: WriteMemory
     read_memory: ReadVisibleMemory
     build_plan: BuildPlanProposal
@@ -260,6 +262,16 @@ def build_production_runtime(
 
     read_memory = ReadVisibleMemory(memories, staff, organizations)
     create_goal = CreateGoal(goals, staff, ids, clock, audit)
+    submit_direct_instruction = SubmitDirectInstruction(
+        staff=staff,
+        organizations=organizations,
+        goals=goals,
+        plans=plans,
+        queue=worker_queue,
+        ids=ids,
+        clock=clock,
+        audit=audit,
+    )
     write_memory = WriteMemory(memories, staff, organizations, ids, clock, audit)
     build_plan = BuildPlanProposal(
         goals,
@@ -331,6 +343,7 @@ def build_production_runtime(
         planner=actual_planner,
         reasoner=actual_reasoner,
         create_goal=create_goal,
+        submit_direct_instruction=submit_direct_instruction,
         write_memory=write_memory,
         read_memory=read_memory,
         build_plan=build_plan,
