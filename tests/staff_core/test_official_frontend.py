@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
+import time
 import urllib.error
 import urllib.request
 
@@ -174,7 +175,7 @@ def test_ui_login_issues_http_only_session_and_projects_real_staff(tmp_path) -> 
         thread.join(timeout=2)
 
 
-def test_ui_session_executes_instruction_for_selected_staff_and_returns_result(tmp_path) -> None:
+def test_ui_session_accepts_instruction_immediately_and_worker_finishes_asynchronously(tmp_path) -> None:
     config, server, thread, root = _start_ui(tmp_path)
     try:
         cookie, _ = _login(root, config.api_token)
@@ -185,24 +186,34 @@ def test_ui_session_executes_instruction_for_selected_staff_and_returns_result(t
             headers={"Cookie": cookie, "Content-Type": "application/json", "Accept": "application/json"},
             method="POST",
         )
+        started = time.monotonic()
         with urllib.request.urlopen(request, timeout=5) as response:
             assert response.status == 202
             result = json.load(response)
+        assert time.monotonic() - started < 1.0
         assert result["accepted"] is True
         assert result["staff_id"] == "staff-ui-1"
-        assert result["status"] == "handoff_ready"
-        assert result["execution"]["status"] == "handoff_ready"
-        assert result["execution"]["task_id"]
-        assert result["result"]["text"] == "تم تحليل التعليمات التجريبية بنجاح."
+        assert result["status"] == "queued"
+        assert result["execution"]["status"] == "processing"
+        assert result["execution"]["task_id"] == f"work-task:{result['work_item_id']}"
 
-        request = urllib.request.Request(root + "/ui/api/staff/staff-ui-1/workspace", headers={"Cookie": cookie})
-        with urllib.request.urlopen(request, timeout=5) as response:
-            workspace = json.load(response)
-        assert workspace["queued_work"] == []
-        assert len(workspace["tasks"]) == 1
-        task = workspace["tasks"][0]
-        assert task["task_id"] == result["execution"]["task_id"]
+        workspace = None
+        for _ in range(40):
+            request = urllib.request.Request(root + "/ui/api/staff/staff-ui-1/workspace", headers={"Cookie": cookie})
+            with urllib.request.urlopen(request, timeout=5) as response:
+                workspace = json.load(response)
+            task = next(
+                (item for item in workspace["tasks"] if item["task_id"] == result["execution"]["task_id"]),
+                None,
+            )
+            if task and task.get("decision"):
+                break
+            time.sleep(0.05)
+
+        assert workspace is not None
+        task = next(item for item in workspace["tasks"] if item["task_id"] == result["execution"]["task_id"])
         assert task["decision"]["rationale"] == "تم تحليل التعليمات التجريبية بنجاح."
+        assert workspace["queued_work"] == []
     finally:
         server.shutdown()
         server.server_close()
