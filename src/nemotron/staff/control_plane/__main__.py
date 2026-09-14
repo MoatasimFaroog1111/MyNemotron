@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from .backup import PeriodicBackupScheduler
 from .config import ControlPlaneConfig
+from .default_staff import ensure_default_staff_roster
 from .http_api import serve
 from .runtime import build_production_runtime
 from .service import ControlPlaneService
@@ -10,6 +11,7 @@ from .service import ControlPlaneService
 def main() -> int:
     config = ControlPlaneConfig.from_env()
     runtime = build_production_runtime(config)
+    ensure_default_staff_roster(runtime.staff, runtime.organizations)
     service = ControlPlaneService(runtime)
     try:
         runtime.backups.create("startup")
