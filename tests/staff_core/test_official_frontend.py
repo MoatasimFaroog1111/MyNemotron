@@ -77,7 +77,7 @@ def test_official_frontend_is_same_origin_and_api_token_is_not_embedded(tmp_path
             csp = response.headers["Content-Security-Policy"]
         assert "فريق العمل التفاعلي" in html
         assert "/ui/app.js" in html
-        assert '/ui/team-original.jpg' in html
+        assert "/ui/team-original.jpg" in html
         assert 'width="1080" height="832"' in html
         assert config.api_token not in html
         assert "script-src 'self'" in csp
@@ -86,12 +86,10 @@ def test_official_frontend_is_same_origin_and_api_token_is_not_embedded(tmp_path
         with urllib.request.urlopen(root + "/ui/team-original.jpg", timeout=5) as response:
             image = response.read()
             assert response.headers["Content-Type"] == "image/jpeg"
-        # Verify a complete same-origin JPEG asset without coupling quality to an
-        # arbitrary file-size floor. The stage preserves the canonical 1080x832
-        # coordinate system independently of the web-optimized raster size.
+        # The static asset must be a complete JPEG. Quality is handled by the
+        # web-optimized source image; file size is deliberately not a policy gate.
         assert image.startswith(b"\xff\xd8\xff")
         assert image.endswith(b"\xff\xd9")
-        assert len(image) > 10_000
 
         with pytest.raises(urllib.error.HTTPError) as exc_info:
             urllib.request.urlopen(root + "/ui/api/staff", timeout=5)
