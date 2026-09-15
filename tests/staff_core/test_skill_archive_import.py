@@ -3,12 +3,10 @@ from __future__ import annotations
 import io
 import zipfile
 
-import pytest
-
 from nemotron.staff.adapters.safe_skill_archives import ArchiveSafetyLimits, SafeSkillArchiveInspector
 
 
-def _zip(entries: dict[str, str]) -> bytes:
+def _zip(entries: dict[str, str | bytes]) -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         for path, content in entries.items():
@@ -72,9 +70,50 @@ def test_skill_requires_yaml_frontmatter_name_and_description() -> None:
     assert "frontmatter" in inspection.reason.lower()
 
 
-def test_rar_is_a_bounded_port_not_shell_execution() -> None:
-    inspection = SafeSkillArchiveInspector().inspect("skills.rar", b"Rar!\x1a\x07\x01dummy")
+def test_nested_zip_discovers_skill_without_executing_resources() -> None:
+    inner = _zip(
+        {
+            "skill/SKILL.md": _skill("Nested Accounting", "Review nested accounting evidence"),
+            "skill/helper.py": "raise RuntimeError('must never execute')\n",
+        }
+    )
+    outer = _zip({"github-download/nested-skills.zip": inner})
+
+    inspection = SafeSkillArchiveInspector().inspect("download.zip", outer)
+
+    assert inspection.rejected is False
+    assert [skill.name for skill in inspection.skills] == ["Nested Accounting"]
+    assert "nested-skills.zip!/skill/SKILL.md" in inspection.skills[0].source_path
+
+
+def test_nested_archive_depth_limit_fails_closed() -> None:
+    deepest = _zip({"skill/SKILL.md": _skill("Too Deep", "Must be rejected")})
+    middle = _zip({"inner.zip": deepest})
+    outer = _zip({"middle.zip": middle})
+    inspector = SafeSkillArchiveInspector(limits=ArchiveSafetyLimits(max_nested_depth=1))
+
+    inspection = inspector.inspect("too-deep.zip", outer)
+
+    assert inspection.rejected is True
+    assert "depth" in inspection.reason.lower()
+
+
+class _FakeRarReader:
+    def read_files(self, payload: bytes, *, limits: ArchiveSafetyLimits) -> dict[str, bytes]:
+        assert payload.startswith(b"Rar!\x1a\x07")
+        assert limits.max_file_bytes > 0
+        return {
+            "skills/rar/SKILL.md": _skill("RAR Accounting", "Review accounting from RAR packages").encode(),
+            "skills/rar/inert.py": b"raise RuntimeError('must never execute')\n",
+        }
+
+
+def test_rar_uses_bounded_reader_and_discovers_skill_as_inert_data() -> None:
+    inspector = SafeSkillArchiveInspector(rar_reader=_FakeRarReader())
+
+    inspection = inspector.inspect("skills.rar", b"Rar!\x1a\x07\x01\x00dummy")
 
     assert inspection.archive_kind == "rar"
-    assert inspection.rejected is True
-    assert "unsupported" in inspection.reason.lower()
+    assert inspection.rejected is False
+    assert [skill.name for skill in inspection.skills] == ["RAR Accounting"]
+    assert inspection.skills[0].resources == ("skills/rar/inert.py",)
