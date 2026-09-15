@@ -7,6 +7,7 @@ from typing import Protocol
 
 from nemotron.staff.domain.model import Task
 from nemotron.staff.domain.runtime import Goal, MemoryEntry, WorkItem
+from nemotron.staff.domain.skills import SkillVersion
 
 
 class WorkerAnalysisStatus(str, Enum):
@@ -23,6 +24,7 @@ class WorkerContext:
     work_item: WorkItem
     task: Task
     visible_memory: tuple[MemoryEntry, ...]
+    approved_skills: tuple[SkillVersion, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.organization_id.strip() or not self.staff_id.strip() or not self.role_name.strip():
@@ -35,6 +37,11 @@ class WorkerContext:
             raise ValueError("Worker item is assigned to another staff member.")
         if self.task.assignee_id != self.staff_id:
             raise ValueError("Governed task is assigned to another staff member.")
+        if any(version.status.value != "active" for version in self.approved_skills):
+            raise ValueError("Worker context may contain only active approved skill versions.")
+        version_ids = [version.version_id for version in self.approved_skills]
+        if len(version_ids) != len(set(version_ids)):
+            raise ValueError("Worker context approved skill versions must be unique.")
 
 
 @dataclass(frozen=True, slots=True)
