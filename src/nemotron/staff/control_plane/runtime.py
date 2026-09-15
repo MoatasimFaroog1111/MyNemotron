@@ -57,14 +57,23 @@ from nemotron.staff.application.memory import ReadVisibleMemory, WriteMemory
 from nemotron.staff.application.planning import AcceptPlan, BuildPlanProposal
 from nemotron.staff.application.runtime_ports import PlanningPort
 from nemotron.staff.application.tool_gateway import ExecuteToolTask, InMemoryToolRegistry, PrepareToolExecution
+from nemotron.staff.application.tool_ports import ToolRegistryPort
 from nemotron.staff.application.use_cases import ApproveTask, VerifyTask
 from nemotron.staff.application.worker import StaffWorkerEngine
 from nemotron.staff.application.worker_ports import WorkerReasoningPort
 from nemotron.staff.domain import GovernancePolicy
 from nemotron.staff.domain.durable import RetryPolicy, RuntimeLimits
+from nemotron.staff.domain.model_routing import (
+    BenchmarkModelRouter,
+    BenchmarkSnapshot,
+    RoutingRequest,
+    TaskClass,
+)
+from nemotron.staff.evaluation.skill_gate import CapabilityRegistry
 from nemotron.staff.workflows.bank_reconciliation import BankReconciliationSource, ReviewBankReconciliation
 
 from .backup import SQLiteBackupManager
+from .capability_gates import GatedToolRegistry
 from .config import ControlPlaneConfig
 from .queries import ControlPlaneQueries
 from .readiness import NemotronReadinessProbe
@@ -102,9 +111,12 @@ class ProductionRuntime:
     intents: SQLiteToolIntentRepository
     idempotency: SQLiteIdempotencyRepository
     capabilities: HMACCapabilityAuthority
-    tools: InMemoryToolRegistry
+    capability_registry: CapabilityRegistry
+    tools: ToolRegistryPort
     planner: PlanningPort
     reasoner: WorkerReasoningPort
+    planner_model_id: str
+    worker_model_id: str
     create_goal: CreateGoal
     submit_direct_instruction: SubmitDirectInstruction
     write_memory: WriteMemory
@@ -144,6 +156,8 @@ class ProductionRuntime:
             "bank_reconciliation": self.review_bank_reconciliation is not None,
             "nemotron": {
                 "model": self.config.nemotron_model,
+                "planner_model": self.planner_model_id,
+                "worker_model": self.worker_model_id,
                 "api_key_configured": bool(self.config.nemotron_api_key),
             },
             "registered_tools": list(self.registered_tools),
@@ -172,6 +186,9 @@ def build_production_runtime(
     planner: PlanningPort | None = None,
     reasoner: WorkerReasoningPort | None = None,
     bank_reconciliation_source: BankReconciliationSource | None = None,
+    model_router: BenchmarkModelRouter | None = None,
+    benchmark_snapshots: tuple[BenchmarkSnapshot, ...] = (),
+    capability_registry: CapabilityRegistry | None = None,
 ) -> ProductionRuntime:
     config.prepare_paths()
     clock = UtcClock()
@@ -208,16 +225,18 @@ def build_production_runtime(
     intents = SQLiteToolIntentRepository(gateway_store)
     idempotency = SQLiteIdempotencyRepository(gateway_store)
     capabilities = HMACCapabilityAuthority(config.capability_secret)
-    tools = InMemoryToolRegistry()
+    raw_tools = InMemoryToolRegistry()
+    release_capabilities = capability_registry or CapabilityRegistry()
+    tools: ToolRegistryPort = GatedToolRegistry(raw_tools, release_capabilities)
     registered: list[str] = []
 
     files_adapter = FilesToolAdapter(FilesToolConfig(config.files_root), capabilities)
-    tools.register(files_tool_definition(), files_adapter)
+    raw_tools.register(files_tool_definition(), files_adapter)
     registered.append("files")
 
     if config.github_allowed_repositories:
         github_read_only = config.github_read_only or not bool(config.github_token)
-        tools.register(
+        raw_tools.register(
             github_tool_definition(read_only=github_read_only),
             GitHubToolAdapter(
                 GitHubToolConfig(
@@ -231,7 +250,7 @@ def build_production_runtime(
         registered.append("github")
 
     if config.smtp_host and config.smtp_from_address:
-        tools.register(
+        raw_tools.register(
             email_tool_definition(),
             SMTPEmailToolAdapter(
                 SMTPToolConfig(
@@ -256,14 +275,14 @@ def build_production_runtime(
             api_key=config.odoo_api_key,
             allowed_models=config.odoo_allowed_models,
         )
-        tools.register(
+        raw_tools.register(
             odoo_tool_definition(),
             OdooToolAdapter(odoo_config, capabilities),
         )
         registered.append("odoo")
 
     if config.browser_allowed_hosts:
-        tools.register(
+        raw_tools.register(
             browser_tool_definition(),
             BrowserToolAdapter(BrowserToolConfig(config.browser_allowed_hosts), capabilities),
         )
@@ -279,17 +298,31 @@ def build_production_runtime(
         ReviewBankReconciliation(reconciliation_source) if reconciliation_source is not None else None
     )
 
+    planner_model_id = config.nemotron_model
+    worker_model_id = config.nemotron_model
+    if model_router is not None:
+        if not benchmark_snapshots:
+            raise ValueError("Benchmark-driven routing requires measured benchmark snapshots.")
+        planner_model_id = model_router.select(
+            RoutingRequest(TaskClass.COMPLEX_PLANNING, "ar", 0),
+            benchmark_snapshots,
+        ).model_id
+        worker_model_id = model_router.select(
+            RoutingRequest(TaskClass.ARABIC_ACCOUNTING, "ar", 0),
+            benchmark_snapshots,
+        ).model_id
+
     actual_planner = planner or NemotronPlanningAdapter(
         NemotronPlannerConfig(
             base_url=config.nemotron_base_url,
-            model=config.nemotron_model,
+            model=planner_model_id,
             api_key=config.nemotron_api_key,
         )
     )
     actual_reasoner = reasoner or NemotronWorkerReasoningAdapter(
         NemotronWorkerConfig(
             base_url=config.nemotron_base_url,
-            model=config.nemotron_model,
+            model=worker_model_id,
             api_key=config.nemotron_api_key,
             max_tokens=config.nemotron_worker_max_tokens,
             max_visible_memory=config.nemotron_worker_memory_limit,
@@ -351,7 +384,7 @@ def build_production_runtime(
     backups = SQLiteBackupManager(db_path, config.backup_dir, retention=config.backup_retention)
     nemotron_readiness = NemotronReadinessProbe(
         base_url=config.nemotron_base_url,
-        model=config.nemotron_model,
+        model=worker_model_id,
         api_key=config.nemotron_api_key,
         timeout_seconds=config.nemotron_readiness_timeout_seconds,
         ttl_seconds=config.nemotron_readiness_ttl_seconds,
@@ -378,9 +411,12 @@ def build_production_runtime(
         intents=intents,
         idempotency=idempotency,
         capabilities=capabilities,
+        capability_registry=release_capabilities,
         tools=tools,
         planner=actual_planner,
         reasoner=actual_reasoner,
+        planner_model_id=planner_model_id,
+        worker_model_id=worker_model_id,
         create_goal=create_goal,
         submit_direct_instruction=submit_direct_instruction,
         write_memory=write_memory,
