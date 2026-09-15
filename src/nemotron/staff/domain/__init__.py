@@ -23,6 +23,15 @@ from .organization import (
     OrganizationError,
     StaffPlacement,
 )
+from .skills import (
+    SkillDefinition,
+    SkillTrainingError,
+    SkillValidationResult,
+    SkillVersion,
+    TrainingAssignment,
+    TrainingRecommendation,
+    TrainingStatus,
+)
 
 __all__ = [
     "Approval",
@@ -39,11 +48,18 @@ __all__ = [
     "PermissionDenied",
     "RiskLevel",
     "Role",
+    "SkillDefinition",
+    "SkillTrainingError",
+    "SkillValidationResult",
+    "SkillVersion",
     "StaffCoreError",
     "StaffMember",
     "StaffPlacement",
     "StaffStatus",
     "Task",
     "TaskState",
+    "TrainingAssignment",
+    "TrainingRecommendation",
+    "TrainingStatus",
     "Verification",
 ]
