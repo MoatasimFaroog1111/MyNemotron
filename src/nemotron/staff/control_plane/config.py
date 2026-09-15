@@ -51,6 +51,12 @@ class ControlPlaneConfig:
     nemotron_readiness_ttl_seconds: int = 120
     nemotron_worker_max_tokens: int = 600
     nemotron_worker_memory_limit: int = 8
+    worker_max_attempts: int = 3
+    worker_max_concurrency: int = 4
+    worker_lease_seconds: int = 300
+    worker_retry_initial_seconds: int = 5
+    worker_retry_max_seconds: int = 300
+    worker_retry_backoff_factor: float = 2.0
     api_read_rpm: int = 120
     api_write_rpm: int = 30
     api_auth_failure_rpm: int = 20
@@ -83,6 +89,18 @@ class ControlPlaneConfig:
             raise ValueError("NEMOTRON_WORKER_MAX_TOKENS must be at least 64.")
         if self.nemotron_worker_memory_limit < 1:
             raise ValueError("NEMOTRON_WORKER_MEMORY_LIMIT must be positive.")
+        if self.worker_max_attempts < 1:
+            raise ValueError("STAFF_WORKER_MAX_ATTEMPTS must be positive.")
+        if self.worker_max_concurrency < 1:
+            raise ValueError("STAFF_WORKER_MAX_CONCURRENCY must be positive.")
+        if self.worker_lease_seconds < 1:
+            raise ValueError("STAFF_WORKER_LEASE_SECONDS must be positive.")
+        if self.worker_retry_initial_seconds < 0:
+            raise ValueError("STAFF_WORKER_RETRY_INITIAL_SECONDS cannot be negative.")
+        if self.worker_retry_max_seconds < self.worker_retry_initial_seconds:
+            raise ValueError("STAFF_WORKER_RETRY_MAX_SECONDS cannot be smaller than initial retry delay.")
+        if self.worker_retry_backoff_factor < 1:
+            raise ValueError("STAFF_WORKER_RETRY_BACKOFF_FACTOR must be at least 1.")
         if min(self.api_read_rpm, self.api_write_rpm, self.api_auth_failure_rpm) < 1:
             raise ValueError("API rate limits must be positive.")
 
@@ -136,6 +154,12 @@ class ControlPlaneConfig:
             nemotron_readiness_ttl_seconds=int(env.get("NEMOTRON_READINESS_TTL_SECONDS", "120")),
             nemotron_worker_max_tokens=int(env.get("NEMOTRON_WORKER_MAX_TOKENS", "600")),
             nemotron_worker_memory_limit=int(env.get("NEMOTRON_WORKER_MEMORY_LIMIT", "8")),
+            worker_max_attempts=int(env.get("STAFF_WORKER_MAX_ATTEMPTS", "3")),
+            worker_max_concurrency=int(env.get("STAFF_WORKER_MAX_CONCURRENCY", "4")),
+            worker_lease_seconds=int(env.get("STAFF_WORKER_LEASE_SECONDS", "300")),
+            worker_retry_initial_seconds=int(env.get("STAFF_WORKER_RETRY_INITIAL_SECONDS", "5")),
+            worker_retry_max_seconds=int(env.get("STAFF_WORKER_RETRY_MAX_SECONDS", "300")),
+            worker_retry_backoff_factor=float(env.get("STAFF_WORKER_RETRY_BACKOFF_FACTOR", "2.0")),
             api_read_rpm=int(env.get("STAFF_API_READ_RPM", "120")),
             api_write_rpm=int(env.get("STAFF_API_WRITE_RPM", "30")),
             api_auth_failure_rpm=int(env.get("STAFF_API_AUTH_FAILURE_RPM", "20")),
@@ -162,6 +186,14 @@ class ControlPlaneConfig:
             "nemotron_worker": {
                 "max_tokens": self.nemotron_worker_max_tokens,
                 "memory_limit": self.nemotron_worker_memory_limit,
+            },
+            "worker_runtime": {
+                "max_attempts": self.worker_max_attempts,
+                "max_concurrency": self.worker_max_concurrency,
+                "lease_seconds": self.worker_lease_seconds,
+                "retry_initial_seconds": self.worker_retry_initial_seconds,
+                "retry_max_seconds": self.worker_retry_max_seconds,
+                "retry_backoff_factor": self.worker_retry_backoff_factor,
             },
             "github_configured": bool(self.github_allowed_repositories),
             "github_read_only": self.github_read_only,
