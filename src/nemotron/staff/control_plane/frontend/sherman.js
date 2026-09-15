@@ -1,5 +1,5 @@
 const SHERMAN_ID='staff-sherman-trainer';
-const SHERMAN_ACCEPT='.zip,.rar,.7z,.tar,.tar.gz,.tgz';
+const SHERMAN_ACCEPT='.zip,.rar,.tar,.tar.gz,.tgz';
 const SHERMAN_STATES=['Uploading','Scanning','Validated','Awaiting Approval','Active','Rejected','Unsupported','Malformed','Unsafe','Duplicate'];
 const shermanRecommendations=new Map();
 
@@ -40,7 +40,8 @@ function renderShermanWorkspace(member,data){
       <div class="sherman-state" id="shermanTrainingState" data-state="Awaiting Approval"><strong>Awaiting Approval</strong><span>جاهز لاستقبال حزمة مهارات.</span></div>
       <label class="sherman-drop-zone" id="sherman-drop-zone" for="skillUpload" tabindex="0">
         <strong>اسحب الملف هنا أو اضغط للاختيار</strong>
-        <span>ZIP · RAR · 7z · TAR · TAR.GZ · TGZ</span>
+        <span>ZIP · RAR · TAR · TAR.GZ · TGZ</span>
+        <small>7z غير مدعوم حاليًا ويُرفض بأمان دون تشغيل محتواه.</small>
         <input id="skillUpload" type="file" accept="${SHERMAN_ACCEPT}">
       </label>
       <div class="sherman-security">لا يتم تشغيل أي Python / Shell / EXE أو install hook أثناء الاستيراد أو التدريب.</div>
@@ -110,7 +111,7 @@ function skillCard(skill){
 async function loadRecommendation(versionId){
   try{
     const result=await api(`/ui/api/skills/${encodeURIComponent(versionId)}/recommendations`,{
-      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({actor_id:SHERMAN_ID})
+      method:'POST',headers:{'Content-Type':'application/json'},body:'{}'
     });
     shermanRecommendations.set(versionId,result);
   }catch(error){if(error.message!=='unauthorized')shermanRecommendations.set(versionId,{staff_ids:[],confidence:0,rationale:'manual'});}
@@ -142,7 +143,7 @@ async function trainSkill(card,mode){
   card.querySelectorAll('button').forEach(button=>button.disabled=true);
   try{
     const result=await api(`/ui/api/skills/${encodeURIComponent(versionId)}/assignments`,{
-      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode,staff_ids:selected,actor_id:SHERMAN_ID})
+      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode,staff_ids:selected})
     });
     trainingState('Active',`تم تدريب ${result.staff_ids.length} موظف/موظفين والتحقق من التعيين.`);
     await refreshShermanSkills();
