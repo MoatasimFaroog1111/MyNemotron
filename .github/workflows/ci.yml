@@ -32,7 +32,13 @@ jobs:
       - name: Install lightweight CI tools
         run: |
           python -m pip install --upgrade pip
-          python -m pip install ruff pytest
+          python -m pip install ruff pytest -r deploy/staff-requirements.txt
+
+      - name: Install and verify RAR backend
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends unar
+          python -c "import rarfile; rarfile.tool_setup()"
 
       - name: Build verified frontend assets
         run: python deploy/build_frontend_assets.py
