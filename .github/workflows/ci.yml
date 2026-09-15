@@ -54,6 +54,9 @@ jobs:
           PYTHONPATH: src
         run: python -m pytest -q tests/staff_core --junitxml=pytest-results.xml
 
+      - name: Build Staff Control Plane container
+        run: docker build --tag mynemotron-staff-ci .
+
       - name: Upload Staff Core test report
         if: always()
         uses: actions/upload-artifact@v4
