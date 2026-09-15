@@ -6,6 +6,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Sherman reads RAR archives as inert data. rarfile parses archive metadata in
+# Python and uses unar only as a decompression backend; no user-provided shell
+# command is ever executed by the application.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends unar \
+    && rm -rf /var/lib/apt/lists/*
+COPY deploy/staff-requirements.txt /app/deploy/staff-requirements.txt
+RUN python -m pip install --no-cache-dir -r /app/deploy/staff-requirements.txt \
+    && python -c "import rarfile; rarfile.tool_setup()"
+
 # The Staff Control Plane is deliberately dependency-light. Copy only the
 # runtime package instead of installing the full Nemotron training stack.
 COPY src/nemotron /app/src/nemotron
