@@ -15,7 +15,8 @@ def test_sherman_training_workspace_contract_is_packaged() -> None:
     assert "staff-sherman-trainer" in sherman
     assert "sherman-drop-zone" in sherman
     assert "skillUpload" in sherman
-    assert ".zip,.rar,.7z,.tar,.tar.gz,.tgz" in sherman
+    assert "const SHERMAN_ACCEPT='.zip,.rar,.tar,.tar.gz,.tgz';" in sherman
+    assert "7z غير مدعوم حاليًا" in sherman
     assert "تدريب المقترحين" in sherman
     assert "تدريب الجميع" in sherman
     assert "تدريب المحددين" in sherman
