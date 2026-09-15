@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Protocol
 
-from nemotron.staff.domain import PermissionDenied, RiskLevel
+from nemotron.staff.domain import OrganizationError, PermissionDenied, RiskLevel
 from nemotron.staff.domain.knowledge import (
     CorrectionStatus,
     KnowledgeCorrection,
@@ -199,12 +199,14 @@ class DecideKnowledgeCorrection:
         self,
         repository: KnowledgeRepository,
         staff: StaffRepository,
+        organizations: OrganizationRepository,
         ids: IdGeneratorPort,
         clock: ClockPort,
         audit: AuditPort,
     ) -> None:
         self._repository = repository
         self._staff = staff
+        self._organizations = organizations
         self._ids = ids
         self._clock = clock
         self._audit = audit
@@ -220,6 +222,12 @@ class DecideKnowledgeCorrection:
         correction = self._repository.get_correction(correction_id)
         approver = self._staff.get(approver_id)
         approver.assert_allowed("knowledge.approve", "institutional-memory", RiskLevel.HIGH)
+        organization = self._organizations.get(correction.organization_id)
+        try:
+            organization.placement_for(approver_id)
+        except OrganizationError as exc:
+            raise PermissionDenied("Approver is not a member of the correction organization.") from exc
+
         now = self._clock.now()
         decided = correction.decide(
             approver_id=approver_id,
@@ -228,6 +236,8 @@ class DecideKnowledgeCorrection:
             rationale=rationale,
         )
         target = self._repository.get_record(correction.target_knowledge_id)
+        if target.organization_id != correction.organization_id:
+            raise PermissionDenied("Correction target is outside the correction organization.")
         if approved:
             if not target.is_active:
                 raise PermissionDenied("Correction target was superseded before approval.")

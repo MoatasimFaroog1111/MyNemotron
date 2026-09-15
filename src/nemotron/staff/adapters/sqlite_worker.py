@@ -21,7 +21,6 @@ class SQLiteWorkerQueue:
     ) -> None:
         self.store = store
         self.limits = limits or RuntimeLimits(max_concurrency=4, lease_seconds=300)
-        # Keep zero-delay compatibility for callers that do not opt into production retry scheduling.
         self.retry_policy = retry_policy or RetryPolicy(
             max_attempts=3,
             initial_delay_seconds=0,
@@ -62,16 +61,14 @@ class SQLiteWorkerQueue:
             )
 
     def enqueue(self, item: WorkItem) -> None:
-        """Delegate durable queue insertion to the runtime store."""
         self.store.enqueue(item)
 
     def inbox(self, staff_id: str) -> tuple[WorkItem, ...]:
-        """Return queued/claimed work using the runtime store projection."""
         return self.store.inbox(staff_id)
 
     def _recover_expired_leases(self, db: sqlite3.Connection, *, at: datetime) -> int:
         expired = db.execute(
-            """SELECT q.work_item_id
+            """SELECT q.work_item_id, COALESCE(a.attempts, 0) AS attempts
             FROM runtime_work_queue AS q
             LEFT JOIN runtime_worker_attempts AS a ON a.work_item_id = q.work_item_id
             WHERE q.status = ? AND (a.lease_expires_at IS NULL OR a.lease_expires_at <= ?)""",
@@ -79,22 +76,59 @@ class SQLiteWorkerQueue:
         ).fetchall()
         if not expired:
             return 0
-        ids = tuple(str(row["work_item_id"]) for row in expired)
-        placeholders = ",".join("?" for _ in ids)
-        db.execute(
-            f"""UPDATE runtime_work_queue
-            SET status = ?, claimed_at = NULL, version = version + 1
-            WHERE work_item_id IN ({placeholders}) AND status = ?""",
-            (WorkStatus.QUEUED.value, *ids, WorkStatus.CLAIMED.value),
+
+        retry_ids = tuple(
+            str(row["work_item_id"])
+            for row in expired
+            if int(row["attempts"]) < self.retry_policy.max_attempts
         )
-        db.execute(
-            f"""UPDATE runtime_worker_attempts
-            SET lease_expires_at = NULL,
-                last_error = COALESCE(last_error, 'worker lease expired; recovered for retry')
-            WHERE work_item_id IN ({placeholders})""",
-            ids,
+        exhausted_ids = tuple(
+            str(row["work_item_id"])
+            for row in expired
+            if int(row["attempts"]) >= self.retry_policy.max_attempts
         )
-        return len(ids)
+
+        if retry_ids:
+            placeholders = ",".join("?" for _ in retry_ids)
+            db.execute(
+                f"""UPDATE runtime_work_queue
+                SET status = ?, claimed_at = NULL, version = version + 1
+                WHERE work_item_id IN ({placeholders}) AND status = ?""",
+                (WorkStatus.QUEUED.value, *retry_ids, WorkStatus.CLAIMED.value),
+            )
+            db.execute(
+                f"""UPDATE runtime_worker_attempts
+                SET lease_expires_at = NULL,
+                    last_error = 'worker lease expired; recovered for retry'
+                WHERE work_item_id IN ({placeholders})""",
+                retry_ids,
+            )
+
+        if exhausted_ids:
+            placeholders = ",".join("?" for _ in exhausted_ids)
+            summary = "Worker lease expired; retry limit reached; human review required."
+            db.execute(
+                f"""UPDATE runtime_work_queue
+                SET status = ?, claimed_at = NULL, completed_at = ?, result_summary = ?, version = version + 1
+                WHERE work_item_id IN ({placeholders}) AND status = ?""",
+                (
+                    WorkStatus.BLOCKED.value,
+                    at.isoformat(),
+                    summary,
+                    *exhausted_ids,
+                    WorkStatus.CLAIMED.value,
+                ),
+            )
+            db.execute(
+                f"""UPDATE runtime_worker_attempts
+                SET lease_expires_at = NULL,
+                    next_attempt_at = NULL,
+                    last_error = 'worker lease expired; retry limit reached'
+                WHERE work_item_id IN ({placeholders})""",
+                exhausted_ids,
+            )
+
+        return len(expired)
 
     def _active_lease_count(self, db: sqlite3.Connection, *, at: datetime) -> int:
         row = db.execute(
@@ -183,7 +217,6 @@ class SQLiteWorkerQueue:
             db.close()
 
     def heartbeat(self, work_item_id: str, *, staff_id: str, at: datetime) -> None:
-        """Extend a live worker lease without changing the WorkItem optimistic-concurrency version."""
         lease_expires_at = at + timedelta(seconds=self.limits.lease_seconds)
         with self._connect() as db:
             result = db.execute(
@@ -236,7 +269,6 @@ class SQLiteWorkerQueue:
         expected_version: int,
         reason: str,
     ) -> None:
-        """Return claimed work immediately to the queue, used for non-retry cleanup paths."""
         self._requeue(
             work_item_id,
             staff_id=staff_id,
@@ -254,7 +286,6 @@ class SQLiteWorkerQueue:
         at: datetime,
         reason: str,
     ) -> datetime:
-        """Requeue transient failure for a policy-controlled future attempt."""
         attempt = self.attempts(work_item_id)
         if attempt < 1:
             raise StaffRuntimeError("Cannot schedule retry before the first worker attempt.")

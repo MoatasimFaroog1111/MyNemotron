@@ -69,10 +69,12 @@ class BenchmarkReport:
             if not subset:
                 continue
             recovery_cases = tuple(result for result in subset if result.inject_failure)
+            # No injected-failure evidence means recovery is unmeasured, not perfect.
+            # Represent it conservatively as zero so routing quality gates fail closed.
             recovery_rate = (
                 sum(result.recovered_after_failure for result in recovery_cases) / len(recovery_cases)
                 if recovery_cases
-                else 1.0
+                else 0.0
             )
             snapshots.append(
                 BenchmarkSnapshot(

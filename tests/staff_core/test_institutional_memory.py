@@ -183,7 +183,7 @@ def test_approved_correction_supersedes_old_fact_atomically(tmp_path) -> None:
         source_observed_at=datetime(2026, 9, 14, tzinfo=UTC),
     )
 
-    decide = DecideKnowledgeCorrection(repository, staff, ids, clock, audit)
+    decide = DecideKnowledgeCorrection(repository, staff, organizations, ids, clock, audit)
     with pytest.raises(Exception):
         decide(correction.correction_id, "writer", approved=True, rationale="self approval")
 
