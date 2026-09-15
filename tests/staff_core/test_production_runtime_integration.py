@@ -44,7 +44,7 @@ def test_runtime_wires_worker_durability_policy_from_config(tmp_path) -> None:
     assert runtime.worker_queue.retry_policy.initial_delay_seconds == 7
     assert runtime.worker_queue.retry_policy.max_delay_seconds == 70
     assert runtime.worker_queue.retry_policy.backoff_factor == 3.0
-    assert runtime.worker.max_attempts == 6
+    assert runtime.worker._max_attempts == 6
 
 
 def test_sqlite_bank_statement_repository_survives_recreation(tmp_path) -> None:
