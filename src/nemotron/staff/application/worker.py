@@ -278,7 +278,9 @@ class StaffWorkerEngine:
             task=task,
             visible_memory=visible_memory,
         )
+        self._queue.heartbeat(item.work_item_id, staff_id=item.assigned_staff_id, at=self._clock.now())
         analysis = self._reasoner.analyze(context)
+        self._queue.heartbeat(item.work_item_id, staff_id=item.assigned_staff_id, at=self._clock.now())
         if analysis.status is WorkerAnalysisStatus.BLOCKED:
             raise WorkerBlocked("Reasoner reported insufficient or conflicting evidence.")
 
@@ -369,13 +371,31 @@ class StaffWorkerEngine:
                 self._materialize.task_id_for(item),
                 detail="Retry limit reached; human review required.",
             )
-        self._release(item, reason)
+        now = self._clock.now()
+        retry_at = self._queue.schedule_retry(
+            item.work_item_id,
+            staff_id=item.assigned_staff_id,
+            expected_version=item.version,
+            at=now,
+            reason=reason,
+        )
+        detail = f"{reason}; next_attempt_at={retry_at.isoformat()}"
+        self._audit.append(
+            GovernanceAuditEvent(
+                "worker.retry_scheduled",
+                "work_item",
+                item.work_item_id,
+                item.assigned_staff_id,
+                now,
+                detail,
+            )
+        )
         return WorkerRunResult(
             WorkerRunStatus.RETRY,
             item.assigned_staff_id,
             item.work_item_id,
             self._materialize.task_id_for(item),
-            detail=reason,
+            detail=detail,
         )
 
     def _release(self, item: WorkItem, reason: str) -> None:

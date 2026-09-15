@@ -2,17 +2,32 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from nemotron.staff.adapters.sqlite_runtime import SQLiteRuntimeStore
+from nemotron.staff.domain.durable import RetryPolicy, RuntimeLimits
 from nemotron.staff.domain.runtime import RuntimeError as StaffRuntimeError, WorkItem, WorkStatus
 
 
 class SQLiteWorkerQueue:
-    """Worker-safe queue adapter with atomic claims, retries, releases, and blocking."""
+    """Worker-safe queue with leases, delayed retries, concurrency limits, and crash recovery."""
 
-    def __init__(self, store: SQLiteRuntimeStore) -> None:
+    def __init__(
+        self,
+        store: SQLiteRuntimeStore,
+        *,
+        limits: RuntimeLimits | None = None,
+        retry_policy: RetryPolicy | None = None,
+    ) -> None:
         self.store = store
+        self.limits = limits or RuntimeLimits(max_concurrency=4, lease_seconds=300)
+        # Keep zero-delay compatibility for callers that do not opt into production retry scheduling.
+        self.retry_policy = retry_policy or RetryPolicy(
+            max_attempts=3,
+            initial_delay_seconds=0,
+            max_delay_seconds=0,
+            backoff_factor=1.0,
+        )
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
@@ -22,14 +37,28 @@ class SQLiteWorkerQueue:
         connection.execute("PRAGMA journal_mode = WAL")
         return connection
 
+    @staticmethod
+    def _columns(db: sqlite3.Connection, table: str) -> frozenset[str]:
+        return frozenset(str(row[1]) for row in db.execute(f"PRAGMA table_info({table})").fetchall())
+
     def _initialize(self) -> None:
         with self._connect() as db:
             db.execute(
                 """CREATE TABLE IF NOT EXISTS runtime_worker_attempts (
                     work_item_id TEXT PRIMARY KEY,
                     attempts INTEGER NOT NULL DEFAULT 0,
-                    last_error TEXT
+                    last_error TEXT,
+                    lease_expires_at TEXT,
+                    next_attempt_at TEXT
                 )"""
+            )
+            columns = self._columns(db, "runtime_worker_attempts")
+            if "lease_expires_at" not in columns:
+                db.execute("ALTER TABLE runtime_worker_attempts ADD COLUMN lease_expires_at TEXT")
+            if "next_attempt_at" not in columns:
+                db.execute("ALTER TABLE runtime_worker_attempts ADD COLUMN next_attempt_at TEXT")
+            db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_worker_attempt_schedule ON runtime_worker_attempts(next_attempt_at, lease_expires_at)"
             )
 
     def enqueue(self, item: WorkItem) -> None:
@@ -40,16 +69,64 @@ class SQLiteWorkerQueue:
         """Return queued/claimed work using the runtime store projection."""
         return self.store.inbox(staff_id)
 
+    def _recover_expired_leases(self, db: sqlite3.Connection, *, at: datetime) -> int:
+        expired = db.execute(
+            """SELECT q.work_item_id
+            FROM runtime_work_queue AS q
+            LEFT JOIN runtime_worker_attempts AS a ON a.work_item_id = q.work_item_id
+            WHERE q.status = ? AND (a.lease_expires_at IS NULL OR a.lease_expires_at <= ?)""",
+            (WorkStatus.CLAIMED.value, at.isoformat()),
+        ).fetchall()
+        if not expired:
+            return 0
+        ids = tuple(str(row["work_item_id"]) for row in expired)
+        placeholders = ",".join("?" for _ in ids)
+        db.execute(
+            f"""UPDATE runtime_work_queue
+            SET status = ?, claimed_at = NULL, version = version + 1
+            WHERE work_item_id IN ({placeholders}) AND status = ?""",
+            (WorkStatus.QUEUED.value, *ids, WorkStatus.CLAIMED.value),
+        )
+        db.execute(
+            f"""UPDATE runtime_worker_attempts
+            SET lease_expires_at = NULL,
+                last_error = COALESCE(last_error, 'worker lease expired; recovered for retry')
+            WHERE work_item_id IN ({placeholders})""",
+            ids,
+        )
+        return len(ids)
+
+    def _active_lease_count(self, db: sqlite3.Connection, *, at: datetime) -> int:
+        row = db.execute(
+            """SELECT COUNT(*) AS n
+            FROM runtime_work_queue AS q
+            JOIN runtime_worker_attempts AS a ON a.work_item_id = q.work_item_id
+            WHERE q.status = ? AND a.lease_expires_at > ?""",
+            (WorkStatus.CLAIMED.value, at.isoformat()),
+        ).fetchone()
+        return int(row["n"])
+
     def claim_next(self, staff_id: str, *, at: datetime) -> WorkItem | None:
         db = self._connect()
         try:
             db.execute("BEGIN IMMEDIATE")
+            self._recover_expired_leases(db, at=at)
+            if self._active_lease_count(db, at=at) >= self.limits.max_concurrency:
+                db.execute("COMMIT")
+                return None
+
             rows = db.execute(
-                "SELECT * FROM runtime_work_queue WHERE assigned_staff_id = ? AND status = ? ORDER BY created_at, work_item_id",
+                """SELECT q.*, a.next_attempt_at
+                FROM runtime_work_queue AS q
+                LEFT JOIN runtime_worker_attempts AS a ON a.work_item_id = q.work_item_id
+                WHERE q.assigned_staff_id = ? AND q.status = ?
+                ORDER BY q.created_at, q.work_item_id""",
                 (staff_id, WorkStatus.QUEUED.value),
             ).fetchall()
             chosen = None
             for row in rows:
+                if row["next_attempt_at"] is not None and datetime.fromisoformat(row["next_attempt_at"]) > at:
+                    continue
                 dependencies = tuple(json.loads(row["depends_on_json"]))
                 if dependencies:
                     placeholders = ",".join("?" for _ in dependencies)
@@ -81,13 +158,17 @@ class SQLiteWorkerQueue:
             if result.rowcount != 1:
                 raise StaffRuntimeError("Worker claim lost an optimistic-concurrency race.")
 
+            lease_expires_at = at + timedelta(seconds=self.limits.lease_seconds)
             db.execute(
-                """INSERT INTO runtime_worker_attempts(work_item_id, attempts, last_error)
-                VALUES (?, 1, NULL)
+                """INSERT INTO runtime_worker_attempts(
+                    work_item_id, attempts, last_error, lease_expires_at, next_attempt_at
+                ) VALUES (?, 1, NULL, ?, NULL)
                 ON CONFLICT(work_item_id) DO UPDATE SET
                     attempts = runtime_worker_attempts.attempts + 1,
-                    last_error = NULL""",
-                (chosen["work_item_id"],),
+                    last_error = NULL,
+                    lease_expires_at = excluded.lease_expires_at,
+                    next_attempt_at = NULL""",
+                (chosen["work_item_id"], lease_expires_at.isoformat()),
             )
             row = db.execute(
                 "SELECT * FROM runtime_work_queue WHERE work_item_id = ?",
@@ -101,6 +182,29 @@ class SQLiteWorkerQueue:
         finally:
             db.close()
 
+    def heartbeat(self, work_item_id: str, *, staff_id: str, at: datetime) -> None:
+        """Extend a live worker lease without changing the WorkItem optimistic-concurrency version."""
+        lease_expires_at = at + timedelta(seconds=self.limits.lease_seconds)
+        with self._connect() as db:
+            result = db.execute(
+                """UPDATE runtime_worker_attempts
+                SET lease_expires_at = ?
+                WHERE work_item_id = ?
+                  AND EXISTS (
+                    SELECT 1 FROM runtime_work_queue
+                    WHERE work_item_id = ? AND assigned_staff_id = ? AND status = ?
+                  )""",
+                (
+                    lease_expires_at.isoformat(),
+                    work_item_id,
+                    work_item_id,
+                    staff_id,
+                    WorkStatus.CLAIMED.value,
+                ),
+            )
+            if result.rowcount != 1:
+                raise StaffRuntimeError("Cannot heartbeat a work item without a live claimed lease.")
+
     def complete(
         self,
         work_item_id: str,
@@ -110,13 +214,19 @@ class SQLiteWorkerQueue:
         at: datetime,
         summary: str,
     ) -> WorkItem:
-        return self.store.complete(
+        completed = self.store.complete(
             work_item_id,
             staff_id=staff_id,
             expected_version=expected_version,
             at=at,
             summary=summary,
         )
+        with self._connect() as db:
+            db.execute(
+                "UPDATE runtime_worker_attempts SET lease_expires_at = NULL, next_attempt_at = NULL WHERE work_item_id = ?",
+                (work_item_id,),
+            )
+        return completed
 
     def release(
         self,
@@ -125,6 +235,47 @@ class SQLiteWorkerQueue:
         staff_id: str,
         expected_version: int,
         reason: str,
+    ) -> None:
+        """Return claimed work immediately to the queue, used for non-retry cleanup paths."""
+        self._requeue(
+            work_item_id,
+            staff_id=staff_id,
+            expected_version=expected_version,
+            reason=reason,
+            next_attempt_at=None,
+        )
+
+    def schedule_retry(
+        self,
+        work_item_id: str,
+        *,
+        staff_id: str,
+        expected_version: int,
+        at: datetime,
+        reason: str,
+    ) -> datetime:
+        """Requeue transient failure for a policy-controlled future attempt."""
+        attempt = self.attempts(work_item_id)
+        if attempt < 1:
+            raise StaffRuntimeError("Cannot schedule retry before the first worker attempt.")
+        next_attempt_at = at + self.retry_policy.delay_for_attempt(attempt)
+        self._requeue(
+            work_item_id,
+            staff_id=staff_id,
+            expected_version=expected_version,
+            reason=reason,
+            next_attempt_at=next_attempt_at,
+        )
+        return next_attempt_at
+
+    def _requeue(
+        self,
+        work_item_id: str,
+        *,
+        staff_id: str,
+        expected_version: int,
+        reason: str,
+        next_attempt_at: datetime | None,
     ) -> None:
         if not reason.strip():
             raise StaffRuntimeError("Worker release reason cannot be empty.")
@@ -146,8 +297,10 @@ class SQLiteWorkerQueue:
             if result.rowcount != 1:
                 raise StaffRuntimeError("Worker release was stale, unauthorized, or not claimed.")
             db.execute(
-                "UPDATE runtime_worker_attempts SET last_error = ? WHERE work_item_id = ?",
-                (reason, work_item_id),
+                """UPDATE runtime_worker_attempts
+                SET last_error = ?, lease_expires_at = NULL, next_attempt_at = ?
+                WHERE work_item_id = ?""",
+                (reason, next_attempt_at.isoformat() if next_attempt_at else None, work_item_id),
             )
             db.execute("COMMIT")
         except Exception:
@@ -187,7 +340,9 @@ class SQLiteWorkerQueue:
             if result.rowcount != 1:
                 raise StaffRuntimeError("Worker block was stale, unauthorized, or not claimed.")
             db.execute(
-                "UPDATE runtime_worker_attempts SET last_error = ? WHERE work_item_id = ?",
+                """UPDATE runtime_worker_attempts
+                SET last_error = ?, lease_expires_at = NULL, next_attempt_at = NULL
+                WHERE work_item_id = ?""",
                 (reason, work_item_id),
             )
             db.execute("COMMIT")
@@ -204,3 +359,13 @@ class SQLiteWorkerQueue:
                 (work_item_id,),
             ).fetchone()
         return int(row["attempts"]) if row is not None else 0
+
+    def next_attempt_at(self, work_item_id: str) -> datetime | None:
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT next_attempt_at FROM runtime_worker_attempts WHERE work_item_id = ?",
+                (work_item_id,),
+            ).fetchone()
+        if row is None or row["next_attempt_at"] is None:
+            return None
+        return datetime.fromisoformat(row["next_attempt_at"])

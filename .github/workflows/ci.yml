@@ -46,4 +46,12 @@ jobs:
       - name: Staff Core tests
         env:
           PYTHONPATH: src
-        run: python -m pytest -q tests/staff_core
+        run: python -m pytest -q tests/staff_core --junitxml=pytest-results.xml
+
+      - name: Upload Staff Core test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staff-core-test-report
+          path: pytest-results.xml
+          if-no-files-found: ignore

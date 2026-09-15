@@ -404,6 +404,20 @@ class ControlPlaneRequestHandler(BaseHTTPRequestHandler):
             if not self._rate_limit("write", limit=self._config.api_write_rpm):
                 return
             payload = self._read_json()
+            if parsed.path == "/api/v1/bank-reconciliation/review":
+                transactions = payload.get("transactions")
+                if not isinstance(transactions, list) or any(not isinstance(row, dict) for row in transactions):
+                    raise ValueError("transactions must be a JSON array of objects.")
+                result = self.server.service.review_bank_reconciliation(
+                    bank_statement_reference=str(payload.get("bank_statement_reference", "")),
+                    bank_account_code=str(payload.get("bank_account_code", "")),
+                    start_date=str(payload.get("start_date", "")),
+                    end_date=str(payload.get("end_date", "")),
+                    transactions=transactions,
+                    actor_id=str(payload.get("actor_id", "control-plane")),
+                )
+                self._write_json(HTTPStatus.OK, result)
+                return
             if parsed.path == "/api/v1/backups":
                 result = self.server.service.create_backup(
                     label=str(payload.get("label", "manual")),

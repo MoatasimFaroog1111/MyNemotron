@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from typing import Protocol
 
@@ -71,8 +72,11 @@ class WorkerReasoningPort(Protocol):
 
 
 class WorkerQueuePort(Protocol):
-    def claim_next(self, staff_id: str, *, at) -> WorkItem | None:
-        """Atomically claim the next eligible work item."""
+    def claim_next(self, staff_id: str, *, at: datetime) -> WorkItem | None:
+        """Atomically claim the next eligible work item, recovering expired leases."""
+
+    def heartbeat(self, work_item_id: str, *, staff_id: str, at: datetime) -> None:
+        """Extend a live worker lease without changing the work-item version."""
 
     def complete(
         self,
@@ -80,7 +84,7 @@ class WorkerQueuePort(Protocol):
         *,
         staff_id: str,
         expected_version: int,
-        at,
+        at: datetime,
         summary: str,
     ) -> WorkItem:
         """Complete a claimed work item."""
@@ -93,7 +97,18 @@ class WorkerQueuePort(Protocol):
         expected_version: int,
         reason: str,
     ) -> None:
-        """Return claimed work to the queue after a transient processing failure."""
+        """Return claimed work immediately to the queue for non-retry cleanup."""
+
+    def schedule_retry(
+        self,
+        work_item_id: str,
+        *,
+        staff_id: str,
+        expected_version: int,
+        at: datetime,
+        reason: str,
+    ) -> datetime:
+        """Schedule a transient failure for a future retry and return that time."""
 
     def block(
         self,
@@ -101,7 +116,7 @@ class WorkerQueuePort(Protocol):
         *,
         staff_id: str,
         expected_version: int,
-        at,
+        at: datetime,
         reason: str,
     ) -> None:
         """Move claimed work to blocked for human review."""
