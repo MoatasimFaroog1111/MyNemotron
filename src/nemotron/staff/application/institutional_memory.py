@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Protocol
 
-from nemotron.staff.domain import PermissionDenied, RiskLevel
+from nemotron.staff.domain import OrganizationError, PermissionDenied, RiskLevel
 from nemotron.staff.domain.knowledge import (
     CorrectionStatus,
     KnowledgeCorrection,
@@ -225,7 +225,7 @@ class DecideKnowledgeCorrection:
         organization = self._organizations.get(correction.organization_id)
         try:
             organization.placement_for(approver_id)
-        except LookupError as exc:
+        except OrganizationError as exc:
             raise PermissionDenied("Approver is not a member of the correction organization.") from exc
 
         now = self._clock.now()
