@@ -70,10 +70,18 @@ def test_sqlite_bank_statement_repository_survives_recreation(tmp_path) -> None:
 
 class _FakeOdooReader:
     def __init__(self) -> None:
-        self.calls: list[tuple[str, list[object], tuple[str, ...], int]] = []
+        self.calls: list[tuple[str, list[object], tuple[str, ...], int, str | None]] = []
 
-    def search_read(self, model: str, domain: list[object], fields: tuple[str, ...], *, limit: int):
-        self.calls.append((model, domain, fields, limit))
+    def search_read(
+        self,
+        model: str,
+        domain: list[object],
+        fields: tuple[str, ...],
+        *,
+        limit: int,
+        order: str | None = None,
+    ):
+        self.calls.append((model, domain, fields, limit, order))
         return [
             {
                 "id": 11,
@@ -113,13 +121,14 @@ def test_odoo_ledger_source_reads_account_move_line_without_mutation() -> None:
             source_reference="odoo:account.move.line:11",
         ),
     )
-    model, domain, fields, limit = reader.calls[0]
+    model, domain, fields, limit, order = reader.calls[0]
     assert model == "account.move.line"
     assert ["account_id.code", "=", "101001"] in domain
     assert ["date", ">=", "2026-09-01"] in domain
     assert ["date", "<=", "2026-09-30"] in domain
     assert "balance" in fields
     assert limit == 2000
+    assert order == "id asc"
 
 
 class _InjectedReconciliationSource:
