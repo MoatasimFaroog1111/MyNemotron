@@ -148,8 +148,10 @@ class ApproveTask:
         task = self._tasks.get(task_id)
         approver = self._staff.get(approver_id)
         approver.assert_active()
-        if approver_id in {task.assignee_id, task.created_by}:
-            raise PermissionDenied("Approval must be independent from both the task creator and assignee.")
+        if task.assignee_id == approver_id:
+            raise PermissionDenied("Self-approval is forbidden.")
+        if task.created_by == approver_id:
+            raise PermissionDenied("Task creator cannot approve the same task.")
         approver.assert_allowed("approve", task.resource, task.risk)
         if not approver.role.can_approve(task.risk):
             raise PermissionDenied(f"Role {approver.role.name!r} cannot approve {task.risk.value} risk tasks.")
