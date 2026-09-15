@@ -137,12 +137,16 @@ class ReviewBankReconciliation:
         selected_ledger_ids: set[str] = set()
 
         for transaction in bank:
+            # Only posted, still-unconsumed entries may become automatic match candidates.
+            # Draft entries remain visible through explicit exceptions below, never as final evidence.
             candidates = tuple(
                 sorted(
                     (
                         candidate
                         for entry in ledger
-                        if (candidate := self._score(transaction, entry)) is not None
+                        if entry.posted
+                        and entry.entry_id not in selected_ledger_ids
+                        and (candidate := self._score(transaction, entry)) is not None
                     ),
                     key=lambda candidate: (-candidate.score, candidate.ledger_entry_id),
                 )
@@ -210,10 +214,30 @@ class ReviewBankReconciliation:
                         ),
                     )
                 )
+            elif len(reviewable) > 1:
+                status = MatchStatus.AMBIGUOUS
+                selected = None
+                explanation = "More than one plausible ledger candidate exists; human review is required."
+                exceptions.append(
+                    ReconciliationException(
+                        code="MULTIPLE_REVIEW_CANDIDATES",
+                        severity="medium",
+                        message=explanation,
+                        bank_transaction_id=transaction.transaction_id,
+                    )
+                )
+                proposals.append(
+                    ReconciliationProposal(
+                        proposal_id=f"review-ambiguous:{transaction.transaction_id}",
+                        action="review_ambiguous_match",
+                        summary=f"Review {len(reviewable)} plausible candidates before any accounting action.",
+                        evidence_references=(transaction.source_reference,),
+                    )
+                )
             else:
                 status = MatchStatus.UNMATCHED
                 selected = None
-                explanation = "No ledger entry met the minimum review threshold."
+                explanation = "No posted, unused ledger entry met the minimum review threshold."
                 exceptions.append(
                     ReconciliationException(
                         code="BANK_TRANSACTION_UNMATCHED",
@@ -245,8 +269,6 @@ class ReviewBankReconciliation:
             )
 
         for entry in ledger:
-            if entry.entry_id in selected_ledger_ids:
-                continue
             if not entry.posted:
                 exceptions.append(
                     ReconciliationException(
@@ -278,6 +300,7 @@ class ReviewBankReconciliation:
 
         score = 0.55
         reasons = ["same amount", "same currency"]
+
         days = abs((transaction.transaction_date - entry.entry_date).days)
         if days == 0:
             score += 0.20
