@@ -104,7 +104,7 @@ class SQLiteKnowledgeRepository:
     def save_record(self, record: KnowledgeRecord) -> None:
         with self._connect() as db:
             db.execute(
-                """INSERT INTO institutional_knowledge VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                "INSERT INTO institutional_knowledge VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     record.knowledge_id,
                     record.organization_id,
@@ -144,41 +144,59 @@ class SQLiteKnowledgeRepository:
             return records
 
         def haystack(record: KnowledgeRecord) -> str:
-            return " ".join(
-                (
-                    record.content,
-                    record.source_reference,
-                    record.source_kind.value,
-                )
-            ).casefold()
+            return " ".join((record.content, record.source_reference, record.source_kind.value)).casefold()
 
         return tuple(record for record in records if all(token in haystack(record) for token in tokens))
 
     def save_correction(self, correction: KnowledgeCorrection) -> None:
-        with self._connect() as db:
-            db.execute(
-                """INSERT INTO institutional_corrections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(correction_id) DO UPDATE SET
-                    status=excluded.status,
-                    decided_by=excluded.decided_by,
-                    decided_at=excluded.decided_at,
-                    rationale=excluded.rationale""",
-                (
-                    correction.correction_id,
-                    correction.organization_id,
-                    correction.target_knowledge_id,
-                    correction.proposed_content,
-                    correction.source_kind.value,
-                    correction.source_reference,
-                    correction.source_observed_at.isoformat(),
-                    correction.proposed_by,
-                    correction.proposed_at.isoformat(),
-                    correction.status.value,
-                    correction.decided_by,
-                    correction.decided_at.isoformat() if correction.decided_at else None,
-                    correction.rationale,
-                ),
-            )
+        """Insert a proposal once, or atomically decide a still-pending proposal."""
+        db = self._connect()
+        try:
+            db.execute("BEGIN IMMEDIATE")
+            if correction.status is CorrectionStatus.PENDING:
+                try:
+                    db.execute(
+                        "INSERT INTO institutional_corrections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            correction.correction_id,
+                            correction.organization_id,
+                            correction.target_knowledge_id,
+                            correction.proposed_content,
+                            correction.source_kind.value,
+                            correction.source_reference,
+                            correction.source_observed_at.isoformat(),
+                            correction.proposed_by,
+                            correction.proposed_at.isoformat(),
+                            correction.status.value,
+                            None,
+                            None,
+                            None,
+                        ),
+                    )
+                except sqlite3.IntegrityError as exc:
+                    raise KnowledgeError("Correction proposal already exists.") from exc
+            else:
+                result = db.execute(
+                    """UPDATE institutional_corrections SET
+                        status = ?, decided_by = ?, decided_at = ?, rationale = ?
+                    WHERE correction_id = ? AND status = ?""",
+                    (
+                        correction.status.value,
+                        correction.decided_by,
+                        correction.decided_at.isoformat() if correction.decided_at else None,
+                        correction.rationale,
+                        correction.correction_id,
+                        CorrectionStatus.PENDING.value,
+                    ),
+                )
+                if result.rowcount != 1:
+                    raise KnowledgeError("Correction has already been decided.")
+            db.execute("COMMIT")
+        except Exception:
+            db.execute("ROLLBACK")
+            raise
+        finally:
+            db.close()
 
     def get_correction(self, correction_id: str) -> KnowledgeCorrection:
         with self._connect() as db:
@@ -205,6 +223,25 @@ class SQLiteKnowledgeRepository:
         db = self._connect()
         try:
             db.execute("BEGIN IMMEDIATE")
+
+            # Claim the pending decision first. If another approver already decided it,
+            # no knowledge state may be changed by this stale approval.
+            decision = db.execute(
+                """UPDATE institutional_corrections SET
+                    status = ?, decided_by = ?, decided_at = ?, rationale = ?
+                WHERE correction_id = ? AND status = ?""",
+                (
+                    correction.status.value,
+                    correction.decided_by,
+                    correction.decided_at.isoformat() if correction.decided_at else None,
+                    correction.rationale,
+                    correction.correction_id,
+                    CorrectionStatus.PENDING.value,
+                ),
+            )
+            if decision.rowcount != 1:
+                raise KnowledgeError("Correction has already been decided.")
+
             current = db.execute(
                 "SELECT superseded_by FROM institutional_knowledge WHERE knowledge_id = ?",
                 (target.knowledge_id,),
@@ -213,12 +250,14 @@ class SQLiteKnowledgeRepository:
                 raise LookupError(target.knowledge_id)
             if current["superseded_by"] is not None:
                 raise KnowledgeError("Knowledge target was already superseded.")
-            db.execute(
+            updated = db.execute(
                 "UPDATE institutional_knowledge SET superseded_by = ? WHERE knowledge_id = ? AND superseded_by IS NULL",
                 (superseded.superseded_by, target.knowledge_id),
             )
+            if updated.rowcount != 1:
+                raise KnowledgeError("Knowledge target was already superseded.")
             db.execute(
-                """INSERT INTO institutional_knowledge VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                "INSERT INTO institutional_knowledge VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     replacement.knowledge_id,
                     replacement.organization_id,
@@ -231,19 +270,6 @@ class SQLiteKnowledgeRepository:
                     replacement.recorded_at.isoformat(),
                     replacement.department_id,
                     replacement.superseded_by,
-                ),
-            )
-            db.execute(
-                """UPDATE institutional_corrections SET
-                    status = ?, decided_by = ?, decided_at = ?, rationale = ?
-                    WHERE correction_id = ? AND status = ?""",
-                (
-                    correction.status.value,
-                    correction.decided_by,
-                    correction.decided_at.isoformat() if correction.decided_at else None,
-                    correction.rationale,
-                    correction.correction_id,
-                    CorrectionStatus.PENDING.value,
                 ),
             )
             db.execute("COMMIT")
