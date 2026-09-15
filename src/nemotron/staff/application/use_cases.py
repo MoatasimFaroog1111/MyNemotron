@@ -148,8 +148,8 @@ class ApproveTask:
         task = self._tasks.get(task_id)
         approver = self._staff.get(approver_id)
         approver.assert_active()
-        if task.assignee_id == approver_id:
-            raise PermissionDenied("Self-approval is forbidden.")
+        if approver_id in {task.assignee_id, task.created_by}:
+            raise PermissionDenied("Approval must be independent from both the task creator and assignee.")
         approver.assert_allowed("approve", task.resource, task.risk)
         if not approver.role.can_approve(task.risk):
             raise PermissionDenied(f"Role {approver.role.name!r} cannot approve {task.risk.value} risk tasks.")
@@ -227,8 +227,14 @@ class VerifyTask:
         task = self._tasks.get(task_id)
         verifier = self._staff.get(verifier_id)
         verifier.assert_allowed("verify", task.resource, task.risk)
-        if self._policy.requires_independent_verification(task.risk) and task.assignee_id == verifier_id:
-            raise PermissionDenied("Independent verification is required at this risk level.")
+        if self._policy.requires_independent_verification(task.risk):
+            excluded_ids = {task.assignee_id, task.created_by}
+            if task.approval is not None:
+                excluded_ids.add(task.approval.approver_id)
+            if verifier_id in excluded_ids:
+                raise PermissionDenied(
+                    "Independent verification must use an identity separate from creator, assignee, and approver."
+                )
         now = self._clock.now()
         updated = task.record_verification(Verification(verifier_id, passed, summary, now))
         self._tasks.save(updated)
