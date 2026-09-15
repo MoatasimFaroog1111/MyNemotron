@@ -257,6 +257,8 @@ def build_production_runtime(
             base_url=config.nemotron_base_url,
             model=config.nemotron_model,
             api_key=config.nemotron_api_key,
+            max_tokens=config.nemotron_worker_max_tokens,
+            max_visible_memory=config.nemotron_worker_memory_limit,
         )
     )
 
