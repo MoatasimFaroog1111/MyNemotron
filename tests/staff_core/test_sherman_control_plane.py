@@ -98,7 +98,7 @@ def test_authenticated_skill_import_recommend_and_assign_is_explicit(tmp_path) -
         recommend = _json_request(
             f"http://{host}:{port}/api/v1/skills/{version_id}/recommendations",
             config.api_token,
-            {"actor_id": "ui-operator"},
+            {"actor_id": "spoofed-ui-operator"},
         )
         with urllib.request.urlopen(recommend, timeout=5) as response:
             recommendation = json.load(response)
@@ -111,7 +111,7 @@ def test_authenticated_skill_import_recommend_and_assign_is_explicit(tmp_path) -
         assign = _json_request(
             f"http://{host}:{port}/api/v1/skills/{version_id}/assignments",
             config.api_token,
-            {"mode": "suggested", "actor_id": "ui-operator"},
+            {"mode": "suggested", "actor_id": "spoofed-ui-operator"},
         )
         with urllib.request.urlopen(assign, timeout=5) as response:
             assignment = json.load(response)
@@ -121,8 +121,14 @@ def test_authenticated_skill_import_recommend_and_assign_is_explicit(tmp_path) -
         resolved = skills.resolve_for_staff(target_staff_id)
         assert len(resolved) == 1
         assert resolved[0]["version_id"] == version_id
-        assert any(event.event_type == "skill.imported" for event in runtime.audit.list_recent(limit=100))
-        assert any(event.event_type == "skill.training_assigned" for event in runtime.audit.list_recent(limit=100))
+        skill_events = [
+            event
+            for event in runtime.audit.list_recent(limit=100)
+            if event.event_type.startswith("skill.")
+        ]
+        assert any(event.event_type == "skill.imported" for event in skill_events)
+        assert any(event.event_type == "skill.training_assigned" for event in skill_events)
+        assert {event.actor_id for event in skill_events} == {"control-plane"}
     finally:
         server.shutdown()
         server.server_close()
