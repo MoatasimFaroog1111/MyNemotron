@@ -61,6 +61,19 @@ def test_zip_rejects_uncompressed_archive_bomb_limit() -> None:
     assert "uncompressed" in inspection.reason.lower()
 
 
+def test_skill_manifest_size_is_bounded_before_prompt_ingestion() -> None:
+    payload = _zip({"skill/SKILL.md": _skill("Too Verbose", "Must be bounded", "x" * 1_000)})
+    inspector = SafeSkillArchiveInspector(
+        limits=ArchiveSafetyLimits(max_file_bytes=4_000, max_skill_manifest_bytes=256)
+    )
+
+    inspection = inspector.inspect("too-verbose.zip", payload)
+
+    assert inspection.rejected is True
+    assert "skill.md" in inspection.reason.lower()
+    assert "size" in inspection.reason.lower()
+
+
 def test_skill_requires_yaml_frontmatter_name_and_description() -> None:
     payload = _zip({"skill/SKILL.md": "# no frontmatter\nDo work safely."})
 
