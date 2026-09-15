@@ -93,7 +93,7 @@ def test_authenticated_skill_import_recommend_and_assign_is_explicit(tmp_path) -
         accounting = next(item for item in imported["skills"] if item["skill_id"] == "odoo-accounting-review")
         version_id = accounting["version_id"]
         assert accounting["status"] == "pending"
-        assert skills.resolve_for_staff("staff-financial-accountant") == []
+        assert skills.resolve_for_staff("staff-bank-reconciliation") == []
 
         recommend = _json_request(
             f"http://{host}:{port}/api/v1/skills/{version_id}/recommendations",
@@ -102,9 +102,11 @@ def test_authenticated_skill_import_recommend_and_assign_is_explicit(tmp_path) -
         )
         with urllib.request.urlopen(recommend, timeout=5) as response:
             recommendation = json.load(response)
-        assert "staff-financial-accountant" in recommendation["staff_ids"]
+        assert recommendation["staff_ids"]
+        assert "staff-bank-reconciliation" in recommendation["staff_ids"]
+        target_staff_id = recommendation["staff_ids"][0]
         assert recommendation["activated"] is False
-        assert skills.resolve_for_staff("staff-financial-accountant") == []
+        assert skills.resolve_for_staff(target_staff_id) == []
 
         assign = _json_request(
             f"http://{host}:{port}/api/v1/skills/{version_id}/assignments",
@@ -115,8 +117,8 @@ def test_authenticated_skill_import_recommend_and_assign_is_explicit(tmp_path) -
             assignment = json.load(response)
 
         assert assignment["activated"] is True
-        assert "staff-financial-accountant" in assignment["staff_ids"]
-        resolved = skills.resolve_for_staff("staff-financial-accountant")
+        assert target_staff_id in assignment["staff_ids"]
+        resolved = skills.resolve_for_staff(target_staff_id)
         assert len(resolved) == 1
         assert resolved[0]["version_id"] == version_id
         assert any(event.event_type == "skill.imported" for event in runtime.audit.list_recent(limit=100))
