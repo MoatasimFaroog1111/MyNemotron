@@ -37,7 +37,7 @@ async function api(path,options={}){
   const {headers={},...rest}=options;
   const response=await fetch(path,{credentials:'same-origin',...rest,headers:{Accept:'application/json',...headers}});
   if(response.status===401){showLogin();throw new Error('unauthorized');}
-  if(!response.ok){throw new Error(`HTTP ${response.status}`);}
+  if(!response.ok){const error=new Error(`HTTP ${response.status}`);error.status=response.status;throw error;}
   if(response.status===204)return null;
   return response.json();
 }
@@ -133,16 +133,31 @@ function instructionOutcome(data,workItemId,taskId){
 
 async function waitForInstructionResult(member,workItemId,taskId){
   const started=Date.now();
-  while(Date.now()-started<180000){
-    await sleep(2000);
-    const data=await api(`/ui/api/staff/${encodeURIComponent(member.staff_id)}/workspace`);
-    const outcome=instructionOutcome(data,workItemId,taskId);
-    if(outcome.done)return {data,...outcome};
-    const feedback=document.getElementById('instructionFeedback');
-    if(feedback){feedback.className='instruction-feedback pending';feedback.textContent='تم استلام التعليمات. الموظف يعمل الآن…';}
+  let lastData=null;
+  let transientFailures=0;
+  while(Date.now()-started<300000){
+    await sleep(6000);
+    try{
+      const data=await api(`/ui/api/staff/${encodeURIComponent(member.staff_id)}/workspace`);
+      lastData=data;
+      transientFailures=0;
+      const outcome=instructionOutcome(data,workItemId,taskId);
+      if(outcome.done)return {data,...outcome};
+      const feedback=document.getElementById('instructionFeedback');
+      if(feedback){feedback.className='instruction-feedback pending';feedback.textContent='تم استلام التعليمات. الموظف يعمل الآن…';}
+    }catch(error){
+      if(error.message==='unauthorized')throw error;
+      transientFailures+=1;
+      const feedback=document.getElementById('instructionFeedback');
+      if(feedback){
+        feedback.className='instruction-feedback pending';
+        feedback.textContent=error.status===429?'الموظف يعمل الآن… ننتظر قليلًا قبل المتابعة.':'انقطع الاتصال مؤقتًا… سنواصل متابعة النتيجة تلقائيًا.';
+      }
+      await sleep(Math.min(15000,3000*transientFailures));
+    }
   }
-  const data=await api(`/ui/api/staff/${encodeURIComponent(member.staff_id)}/workspace`);
-  return {data,done:false,ok:false,text:'التنفيذ ما زال جاريًا. يمكنك إبقاء الصفحة مفتوحة أو الرجوع لاحقًا إلى المهام المحكومة.'};
+  if(lastData)return {data:lastData,done:false,ok:false,text:'التنفيذ ما زال جاريًا. يمكنك الرجوع لاحقًا إلى مساحة الموظف وستبقى النتيجة محفوظة في المهام المحكومة.'};
+  throw new Error('polling_unavailable');
 }
 
 async function submitInstruction(member,event){
@@ -176,7 +191,7 @@ async function submitInstruction(member,event){
     if(error.message!=='unauthorized'){
       const current=document.getElementById('instructionFeedback')||feedback;
       current.className='instruction-feedback error';
-      current.textContent='تعذر متابعة التنفيذ. تحقق من الاتصال وحالة Control Plane ثم أعد فتح مساحة الموظف.';
+      current.textContent='تعذر متابعة التنفيذ بعد عدة محاولات. أعد فتح مساحة الموظف؛ النتيجة تبقى محفوظة إذا اكتمل التنفيذ في الخلفية.';
     }
   }finally{
     const currentButton=document.querySelector('#instructionForm button[type="submit"]');

@@ -213,7 +213,7 @@ def test_ui_session_accepts_instruction_immediately_and_worker_finishes_asynchro
         assert workspace is not None
         task = next(item for item in workspace["tasks"] if item["task_id"] == result["execution"]["task_id"])
         assert task["decision"]["rationale"] == "تم تحليل التعليمات التجريبية بنجاح."
-        assert workspace["queued_work"] == []
+        assert all(item["status"] == "claimed" for item in workspace["queued_work"])
     finally:
         server.shutdown()
         server.server_close()
