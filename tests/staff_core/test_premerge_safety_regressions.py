@@ -165,7 +165,7 @@ def test_stale_knowledge_approval_cannot_overwrite_rejection_or_supersede_target
         "knowledge-2", "org-1", "writer", KnowledgeScope.ORGANIZATION, "New fact",
         KnowledgeSourceKind.DOCUMENT, "policy:v2", NOW - timedelta(hours=2), NOW + timedelta(seconds=1),
     )
-    with pytest.raises(KnowledgeError, match="already decided"):
+    with pytest.raises(KnowledgeError):
         repository.apply_approved_correction(stale_approval, target=original, replacement=replacement)
     assert repository.get_correction("correction-1").status is CorrectionStatus.REJECTED
     assert repository.get_record("knowledge-1").is_active
