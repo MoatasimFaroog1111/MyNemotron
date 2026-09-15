@@ -9,6 +9,12 @@ from uuid import uuid4
 from nemotron.staff.adapters.capability_hmac import HMACCapabilityAuthority
 from nemotron.staff.adapters.nemotron_planner import NemotronPlannerConfig, NemotronPlanningAdapter
 from nemotron.staff.adapters.nemotron_worker import NemotronWorkerConfig, NemotronWorkerReasoningAdapter
+from nemotron.staff.adapters.odoo_reconciliation import (
+    OdooLedgerEntrySource,
+    OdooReadClient,
+    ProductionBankReconciliationSource,
+)
+from nemotron.staff.adapters.sqlite_bank_statements import SQLiteBankStatementRepository
 from nemotron.staff.adapters.sqlite_control import (
     SQLiteAuditLog,
     SQLiteControlStore,
@@ -55,6 +61,8 @@ from nemotron.staff.application.use_cases import ApproveTask, VerifyTask
 from nemotron.staff.application.worker import StaffWorkerEngine
 from nemotron.staff.application.worker_ports import WorkerReasoningPort
 from nemotron.staff.domain import GovernancePolicy
+from nemotron.staff.domain.durable import RetryPolicy, RuntimeLimits
+from nemotron.staff.workflows.bank_reconciliation import BankReconciliationSource, ReviewBankReconciliation
 
 from .backup import SQLiteBackupManager
 from .config import ControlPlaneConfig
@@ -88,6 +96,8 @@ class ProductionRuntime:
     goals: SQLiteGoalRepository
     plans: SQLitePlanRepository
     worker_queue: SQLiteWorkerQueue
+    bank_statements: SQLiteBankStatementRepository
+    review_bank_reconciliation: ReviewBankReconciliation | None
     gateway_store: SQLiteGatewayStore
     intents: SQLiteToolIntentRepository
     idempotency: SQLiteIdempotencyRepository
@@ -131,6 +141,7 @@ class ProductionRuntime:
             "files_root": files_ok,
             "backup_storage": backups_ok,
             "persistent_volume": persistent_volume,
+            "bank_reconciliation": self.review_bank_reconciliation is not None,
             "nemotron": {
                 "model": self.config.nemotron_model,
                 "api_key_configured": bool(self.config.nemotron_api_key),
@@ -160,6 +171,7 @@ def build_production_runtime(
     *,
     planner: PlanningPort | None = None,
     reasoner: WorkerReasoningPort | None = None,
+    bank_reconciliation_source: BankReconciliationSource | None = None,
 ) -> ProductionRuntime:
     config.prepare_paths()
     clock = UtcClock()
@@ -177,7 +189,20 @@ def build_production_runtime(
     memories = SQLiteMemoryRepository(runtime_store)
     goals = SQLiteGoalRepository(runtime_store)
     plans = SQLitePlanRepository(runtime_store)
-    worker_queue = SQLiteWorkerQueue(runtime_store)
+    worker_queue = SQLiteWorkerQueue(
+        runtime_store,
+        limits=RuntimeLimits(
+            max_concurrency=config.worker_max_concurrency,
+            lease_seconds=config.worker_lease_seconds,
+        ),
+        retry_policy=RetryPolicy(
+            max_attempts=config.worker_max_attempts,
+            initial_delay_seconds=config.worker_retry_initial_seconds,
+            max_delay_seconds=config.worker_retry_max_seconds,
+            backoff_factor=config.worker_retry_backoff_factor,
+        ),
+    )
+    bank_statements = SQLiteBankStatementRepository(db_path)
 
     gateway_store = SQLiteGatewayStore(db_path)
     intents = SQLiteToolIntentRepository(gateway_store)
@@ -222,19 +247,18 @@ def build_production_runtime(
         )
         registered.append("email")
 
+    odoo_config: OdooToolConfig | None = None
     if config.odoo_base_url and config.odoo_database and config.odoo_uid and config.odoo_api_key:
+        odoo_config = OdooToolConfig(
+            base_url=config.odoo_base_url,
+            database=config.odoo_database,
+            uid=config.odoo_uid,
+            api_key=config.odoo_api_key,
+            allowed_models=config.odoo_allowed_models,
+        )
         tools.register(
             odoo_tool_definition(),
-            OdooToolAdapter(
-                OdooToolConfig(
-                    base_url=config.odoo_base_url,
-                    database=config.odoo_database,
-                    uid=config.odoo_uid,
-                    api_key=config.odoo_api_key,
-                    allowed_models=config.odoo_allowed_models,
-                ),
-                capabilities,
-            ),
+            OdooToolAdapter(odoo_config, capabilities),
         )
         registered.append("odoo")
 
@@ -244,6 +268,16 @@ def build_production_runtime(
             BrowserToolAdapter(BrowserToolConfig(config.browser_allowed_hosts), capabilities),
         )
         registered.append("browser")
+
+    reconciliation_source = bank_reconciliation_source
+    if reconciliation_source is None and odoo_config is not None and "account.move.line" in config.odoo_allowed_models:
+        reconciliation_source = ProductionBankReconciliationSource(
+            bank_statements,
+            OdooLedgerEntrySource(OdooReadClient(odoo_config)),
+        )
+    review_bank_reconciliation = (
+        ReviewBankReconciliation(reconciliation_source) if reconciliation_source is not None else None
+    )
 
     actual_planner = planner or NemotronPlanningAdapter(
         NemotronPlannerConfig(
@@ -298,6 +332,7 @@ def build_production_runtime(
         policy=policy,
         clock=clock,
         audit=audit,
+        max_attempts=config.worker_max_attempts,
     )
     prepare_tool_execution = PrepareToolExecution(tasks, staff, intents, tools, clock, audit)
     approve_task = ApproveTask(tasks, staff, clock, audit)
@@ -337,6 +372,8 @@ def build_production_runtime(
         goals=goals,
         plans=plans,
         worker_queue=worker_queue,
+        bank_statements=bank_statements,
+        review_bank_reconciliation=review_bank_reconciliation,
         gateway_store=gateway_store,
         intents=intents,
         idempotency=idempotency,
