@@ -49,6 +49,8 @@ class ControlPlaneConfig:
     backup_interval_seconds: int = 21600
     nemotron_readiness_timeout_seconds: int = 10
     nemotron_readiness_ttl_seconds: int = 120
+    nemotron_worker_max_tokens: int = 600
+    nemotron_worker_memory_limit: int = 8
     api_read_rpm: int = 120
     api_write_rpm: int = 30
     api_auth_failure_rpm: int = 20
@@ -77,6 +79,10 @@ class ControlPlaneConfig:
             raise ValueError("NEMOTRON_READINESS_TIMEOUT_SECONDS must be positive.")
         if self.nemotron_readiness_ttl_seconds < 1:
             raise ValueError("NEMOTRON_READINESS_TTL_SECONDS must be positive.")
+        if self.nemotron_worker_max_tokens < 64:
+            raise ValueError("NEMOTRON_WORKER_MAX_TOKENS must be at least 64.")
+        if self.nemotron_worker_memory_limit < 1:
+            raise ValueError("NEMOTRON_WORKER_MEMORY_LIMIT must be positive.")
         if min(self.api_read_rpm, self.api_write_rpm, self.api_auth_failure_rpm) < 1:
             raise ValueError("API rate limits must be positive.")
 
@@ -128,6 +134,8 @@ class ControlPlaneConfig:
             backup_interval_seconds=int(env.get("STAFF_BACKUP_INTERVAL_SECONDS", "21600")),
             nemotron_readiness_timeout_seconds=int(env.get("NEMOTRON_READINESS_TIMEOUT_SECONDS", "10")),
             nemotron_readiness_ttl_seconds=int(env.get("NEMOTRON_READINESS_TTL_SECONDS", "120")),
+            nemotron_worker_max_tokens=int(env.get("NEMOTRON_WORKER_MAX_TOKENS", "600")),
+            nemotron_worker_memory_limit=int(env.get("NEMOTRON_WORKER_MEMORY_LIMIT", "8")),
             api_read_rpm=int(env.get("STAFF_API_READ_RPM", "120")),
             api_write_rpm=int(env.get("STAFF_API_WRITE_RPM", "30")),
             api_auth_failure_rpm=int(env.get("STAFF_API_AUTH_FAILURE_RPM", "20")),
@@ -151,6 +159,10 @@ class ControlPlaneConfig:
             "nemotron_base_url": self.nemotron_base_url,
             "nemotron_model": self.nemotron_model,
             "nemotron_api_key_configured": bool(self.nemotron_api_key),
+            "nemotron_worker": {
+                "max_tokens": self.nemotron_worker_max_tokens,
+                "memory_limit": self.nemotron_worker_memory_limit,
+            },
             "github_configured": bool(self.github_allowed_repositories),
             "github_read_only": self.github_read_only,
             "email_configured": bool(self.smtp_host and self.smtp_from_address),
