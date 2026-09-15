@@ -33,6 +33,7 @@ from nemotron.staff.adapters.sqlite_runtime import (
     SQLitePlanRepository,
     SQLiteRuntimeStore,
 )
+from nemotron.staff.adapters.sqlite_skills import SQLiteSkillRegistry
 from nemotron.staff.adapters.sqlite_worker import SQLiteWorkerQueue
 from nemotron.staff.adapters.tools import (
     BrowserToolAdapter,
@@ -56,6 +57,7 @@ from nemotron.staff.application.goals import CreateGoal
 from nemotron.staff.application.memory import ReadVisibleMemory, WriteMemory
 from nemotron.staff.application.planning import AcceptPlan, BuildPlanProposal
 from nemotron.staff.application.runtime_ports import PlanningPort
+from nemotron.staff.application.skill_training import ResolveAssignedSkills
 from nemotron.staff.application.tool_gateway import ExecuteToolTask, InMemoryToolRegistry, PrepareToolExecution
 from nemotron.staff.application.tool_ports import ToolRegistryPort
 from nemotron.staff.application.use_cases import ApproveTask, VerifyTask
@@ -220,6 +222,8 @@ def build_production_runtime(
         ),
     )
     bank_statements = SQLiteBankStatementRepository(db_path)
+    skill_registry = SQLiteSkillRegistry(db_path)
+    resolve_assigned_skills = ResolveAssignedSkills(skill_registry)
 
     gateway_store = SQLiteGatewayStore(db_path)
     intents = SQLiteToolIntentRepository(gateway_store)
@@ -366,6 +370,7 @@ def build_production_runtime(
         clock=clock,
         audit=audit,
         max_attempts=config.worker_max_attempts,
+        skill_resolver=resolve_assigned_skills,
     )
     prepare_tool_execution = PrepareToolExecution(tasks, staff, intents, tools, clock, audit)
     approve_task = ApproveTask(tasks, staff, clock, audit)

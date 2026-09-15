@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import io
+import zipfile
 from datetime import date
 from decimal import Decimal
 
 from nemotron.staff.adapters.odoo_reconciliation import OdooLedgerEntrySource
 from nemotron.staff.adapters.sqlite_bank_statements import SQLiteBankStatementRepository
 from nemotron.staff.control_plane.config import ControlPlaneConfig
+from nemotron.staff.control_plane.default_staff import ensure_default_staff_roster
 from nemotron.staff.control_plane.runtime import build_production_runtime
+from nemotron.staff.control_plane.sherman_skills import ShermanSkillControlService
 from nemotron.staff.workflows.bank_reconciliation import BankTransaction, LedgerEntry
 
 
@@ -195,3 +199,37 @@ def test_runtime_builds_reconciliation_from_odoo_when_read_model_is_allowlisted(
     assert runtime.bank_statements is not None
     assert runtime.review_bank_reconciliation is not None
     assert runtime.health()["bank_reconciliation"] is True
+
+
+def test_sherman_assignment_is_resolved_by_production_worker_after_approval(tmp_path) -> None:
+    runtime = build_production_runtime(_config(tmp_path))
+    ensure_default_staff_roster(runtime.staff, runtime.organizations)
+    sherman = ShermanSkillControlService(runtime)
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "skills/accounting/SKILL.md",
+            "---\nname: Odoo Accounting Review\ndescription: Review Odoo accounting evidence safely.\n---\nUse evidence first.\n",
+        )
+
+    imported = sherman.import_archive(
+        filename="accounting-skill.zip",
+        payload=buffer.getvalue(),
+        actor_id="staff-sherman-trainer",
+    )
+    version_id = imported["skills"][0]["version_id"]
+    assert runtime.worker._skill_resolver("staff-financial-accountant") == ()
+
+    assigned = sherman.assign(
+        version_id,
+        mode="selected",
+        actor_id="staff-sherman-trainer",
+        staff_ids=("staff-financial-accountant",),
+    )
+
+    assert assigned["activated"] is True
+    resolved = runtime.worker._skill_resolver("staff-financial-accountant")
+    assert len(resolved) == 1
+    assert resolved[0].version_id == version_id
+    assert resolved[0].skill.name == "Odoo Accounting Review"
+    assert resolved[0].status.value == "active"
