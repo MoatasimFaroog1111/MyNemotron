@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 
@@ -16,6 +17,7 @@ from nemotron.staff.application.runtime_ports import GoalRepository, PlanReposit
 from nemotron.staff.application.use_cases import AddEvidence, RecordDecision
 from nemotron.staff.domain import GovernancePolicy, InvalidTransition, PermissionDenied, RiskLevel, Task, TaskState
 from nemotron.staff.domain.runtime import GoalStatus, RuntimeError as StaffRuntimeError, WorkItem
+from nemotron.staff.domain.skills import SkillVersion
 
 from .worker_ports import (
     WorkerAnalysisStatus,
@@ -147,6 +149,7 @@ class StaffWorkerEngine:
         clock: ClockPort,
         audit: AuditPort,
         max_attempts: int = 3,
+        skill_resolver: Callable[[str], tuple[SkillVersion, ...]] | None = None,
     ) -> None:
         if max_attempts < 1:
             raise ValueError("max_attempts must be positive.")
@@ -159,6 +162,7 @@ class StaffWorkerEngine:
         self._clock = clock
         self._audit = audit
         self._max_attempts = max_attempts
+        self._skill_resolver = skill_resolver or (lambda _staff_id: ())
         self._materialize = MaterializeWorkTask(tasks, staff, organizations, plans, clock, audit)
         self._add_evidence = AddEvidence(tasks, staff, clock, audit)
         self._record_decision = RecordDecision(tasks, staff, policy, clock, audit)
@@ -269,6 +273,7 @@ class StaffWorkerEngine:
             raise WorkerBlocked(f"Goal is {goal.status.value}; new reasoning is not allowed.")
 
         visible_memory = self._memories(item.organization_id, item.assigned_staff_id)
+        approved_skills = self._skill_resolver(item.assigned_staff_id)
         context = WorkerContext(
             organization_id=item.organization_id,
             staff_id=item.assigned_staff_id,
@@ -277,6 +282,7 @@ class StaffWorkerEngine:
             work_item=item,
             task=task,
             visible_memory=visible_memory,
+            approved_skills=approved_skills,
         )
         self._queue.heartbeat(item.work_item_id, staff_id=item.assigned_staff_id, at=self._clock.now())
         analysis = self._reasoner.analyze(context)
@@ -331,7 +337,7 @@ class StaffWorkerEngine:
                 decided.task_id,
                 item.assigned_staff_id,
                 self._clock.now(),
-                f"work={completed.work_item_id}; state={decided.state.value}",
+                f"work={completed.work_item_id}; state={decided.state.value}; approved_skills={len(approved_skills)}",
             )
         )
         return WorkerRunResult(
