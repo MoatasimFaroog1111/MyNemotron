@@ -25,7 +25,7 @@ class ArchiveSafetyLimits:
 class SafeSkillArchiveInspector:
     """Inspect hostile skill archives as inert data; never execute package content."""
 
-    _RAR_MAGIC = (b"Rar!\x1a\x07\x00", b"Rar!\x1a\x07\x01\x00")
+    _RAR_FAMILY_MAGIC = b"Rar!\x1a\x07"
     _SEVEN_Z_MAGIC = b"7z\xbc\xaf'\x1c"
 
     def __init__(self, *, limits: ArchiveSafetyLimits | None = None) -> None:
@@ -47,7 +47,7 @@ class SafeSkillArchiveInspector:
         return self._reject(filename, kind, digest, "unsupported archive format")
 
     def _kind(self, payload: bytes) -> str:
-        if payload.startswith(self._RAR_MAGIC):
+        if payload.startswith(self._RAR_FAMILY_MAGIC):
             return "rar"
         if payload.startswith(self._SEVEN_Z_MAGIC):
             return "7z"
@@ -63,62 +63,58 @@ class SafeSkillArchiveInspector:
         try:
             with zipfile.ZipFile(io.BytesIO(payload)) as archive:
                 infos = archive.infolist()
-                reason = self._validate_common_entries(
-                    [(info.filename, info.file_size) for info in infos if not info.is_dir()]
-                )
+                reason = self._validate_entries([(item.filename, item.file_size) for item in infos if not item.is_dir()])
                 if reason:
                     return self._reject(filename, "zip", digest, reason)
-                for info in infos:
-                    if info.flag_bits & 0x1:
+                for item in infos:
+                    if item.flag_bits & 0x1:
                         return self._reject(filename, "zip", digest, "encrypted archives are unsupported")
-                    mode = (info.external_attr >> 16) & 0xFFFF
-                    if stat.S_ISLNK(mode):
+                    if stat.S_ISLNK((item.external_attr >> 16) & 0xFFFF):
                         return self._reject(filename, "zip", digest, "symlink entries are unsafe")
                 files = {
-                    self._normalize_path(info.filename): archive.read(info)
-                    for info in infos
-                    if not info.is_dir()
+                    self._normalize_path(item.filename): archive.read(item)
+                    for item in infos
+                    if not item.is_dir()
                 }
         except (zipfile.BadZipFile, RuntimeError, OSError) as exc:
             return self._reject(filename, "zip", digest, f"malformed archive: {type(exc).__name__}")
-        return self._build_inspection(filename, "zip", digest, files)
+        return self._build(filename, "zip", digest, files)
 
     def _inspect_tar(self, filename: str, payload: bytes, digest: str) -> ArchiveInspection:
         try:
             with tarfile.open(fileobj=io.BytesIO(payload), mode="r:*") as archive:
                 members = archive.getmembers()
-                if any(member.issym() or member.islnk() for member in members):
+                if any(item.issym() or item.islnk() for item in members):
                     return self._reject(filename, "tar", digest, "symlink or hard-link entries are unsafe")
-                files_meta = [(member.name, member.size) for member in members if member.isfile()]
-                reason = self._validate_common_entries(files_meta)
+                reason = self._validate_entries([(item.name, item.size) for item in members if item.isfile()])
                 if reason:
                     return self._reject(filename, "tar", digest, reason)
                 files: dict[str, bytes] = {}
-                for member in members:
-                    if not member.isfile():
+                for item in members:
+                    if not item.isfile():
                         continue
-                    stream = archive.extractfile(member)
+                    stream = archive.extractfile(item)
                     if stream is None:
                         return self._reject(filename, "tar", digest, "malformed archive member")
-                    files[self._normalize_path(member.name)] = stream.read(self.limits.max_file_bytes + 1)
+                    files[self._normalize_path(item.name)] = stream.read(self.limits.max_file_bytes + 1)
         except (tarfile.TarError, OSError) as exc:
             return self._reject(filename, "tar", digest, f"malformed archive: {type(exc).__name__}")
-        return self._build_inspection(filename, "tar", digest, files)
+        return self._build(filename, "tar", digest, files)
 
-    def _validate_common_entries(self, entries: list[tuple[str, int]]) -> str:
+    def _validate_entries(self, entries: list[tuple[str, int]]) -> str:
         if len(entries) > self.limits.max_files:
             return "file count exceeds safety limit"
-        total = 0
         seen: set[str] = set()
+        total = 0
         for raw_path, size in entries:
             try:
                 normalized = self._normalize_path(raw_path)
             except ValueError as exc:
                 return str(exc)
-            collision_key = normalized.casefold()
-            if collision_key in seen:
+            key = normalized.casefold()
+            if key in seen:
                 return "duplicate normalized path collision"
-            seen.add(collision_key)
+            seen.add(key)
             if size < 0 or size > self.limits.max_file_bytes:
                 return "individual file size exceeds safety limit"
             total += size
@@ -137,40 +133,26 @@ class SafeSkillArchiveInspector:
             raise ValueError("empty archive path rejected")
         return clean
 
-    def _build_inspection(
-        self,
-        filename: str,
-        kind: str,
-        digest: str,
-        files: dict[str, bytes],
-    ) -> ArchiveInspection:
+    def _build(self, filename: str, kind: str, digest: str, files: dict[str, bytes]) -> ArchiveInspection:
         skill_paths = sorted(path for path in files if PurePosixPath(path).name.casefold() == "skill.md")
         if not skill_paths:
             return self._reject(filename, kind, digest, "SKILL.md frontmatter not found")
         skills: list[SkillDefinition] = []
-        for skill_path in skill_paths:
+        for path in skill_paths:
             try:
-                text = files[skill_path].decode("utf-8")
-                name, description, instructions = self._parse_skill(text)
+                name, description, instructions = self._parse_skill(files[path].decode("utf-8"))
             except (UnicodeDecodeError, ValueError) as exc:
                 return self._reject(filename, kind, digest, f"invalid SKILL.md frontmatter: {exc}")
-            parent = str(PurePosixPath(skill_path).parent)
+            parent = str(PurePosixPath(path).parent)
             prefix = "" if parent == "." else parent + "/"
-            resources = tuple(
-                sorted(
-                    path
-                    for path in files
-                    if path != skill_path and (not prefix or path.startswith(prefix))
-                )
-            )
-            skill_id = self._skill_id(name, skill_path)
+            resources = tuple(sorted(item for item in files if item != path and (not prefix or item.startswith(prefix))))
             skills.append(
                 SkillDefinition(
-                    skill_id=skill_id,
+                    skill_id=self._skill_id(name, path),
                     name=name,
                     description=description,
                     instructions=instructions,
-                    source_path=skill_path,
+                    source_path=path,
                     resources=resources,
                 )
             )
@@ -202,9 +184,7 @@ class SafeSkillArchiveInspector:
     @staticmethod
     def _skill_id(name: str, source_path: str) -> str:
         slug = re.sub(r"[^a-z0-9]+", "-", name.casefold()).strip("-")
-        if slug:
-            return slug
-        return "skill-" + hashlib.sha256(f"{name}\n{source_path}".encode()).hexdigest()[:12]
+        return slug or "skill-" + hashlib.sha256(f"{name}\n{source_path}".encode()).hexdigest()[:12]
 
     @staticmethod
     def _reject(filename: str, kind: str, digest: str, reason: str) -> ArchiveInspection:
