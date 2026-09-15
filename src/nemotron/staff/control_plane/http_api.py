@@ -4,6 +4,10 @@ from . import http_api_legacy as legacy
 from .sherman_skills import ShermanSkillControlService
 
 _MAX_SKILL_UPLOAD_BYTES = 25 * 1024 * 1024
+_SHERMAN_ASSETS = {
+    "/ui/sherman.js": ("sherman.js", "text/javascript; charset=utf-8"),
+    "/ui/sherman.css": ("sherman.css", "text/css; charset=utf-8"),
+}
 
 
 class ControlPlaneHTTPServer(legacy.ControlPlaneHTTPServer):
@@ -28,6 +32,23 @@ class ControlPlaneRequestHandler(legacy.ControlPlaneRequestHandler):
 
     def _skills(self) -> ShermanSkillControlService:
         return ShermanSkillControlService(self.server.service.runtime)
+
+    def _serve_ui_asset(self, path: str) -> bool:
+        sherman_asset = _SHERMAN_ASSETS.get(path)
+        if sherman_asset is None:
+            return super()._serve_ui_asset(path)
+        filename, content_type = sherman_asset
+        asset = self.server.frontend_root / filename
+        if not asset.is_file():
+            self._write_json(legacy.HTTPStatus.NOT_FOUND, {"error": "ui_asset_missing"})
+            return True
+        self._write_bytes(
+            legacy.HTTPStatus.OK,
+            asset.read_bytes(),
+            content_type=content_type,
+            cache_control="no-cache",
+        )
+        return True
 
     def _read_skill_payload(self) -> bytes:
         raw_length = self.headers.get("Content-Length", "0")
