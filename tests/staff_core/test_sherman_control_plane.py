@@ -12,6 +12,7 @@ from nemotron.staff.control_plane.default_staff import ensure_default_staff_rost
 from nemotron.staff.control_plane.http_api import ControlPlaneHTTPServer
 from nemotron.staff.control_plane.runtime import build_production_runtime
 from nemotron.staff.control_plane.service import ControlPlaneService
+from nemotron.staff.control_plane.sherman_skills import ShermanSkillControlService
 
 
 def _config(tmp_path) -> ControlPlaneConfig:  # type: ignore[no-untyped-def]
@@ -55,6 +56,7 @@ def test_authenticated_skill_import_recommend_and_assign_is_explicit(tmp_path) -
     config = _config(tmp_path)
     runtime = build_production_runtime(config)
     ensure_default_staff_roster(runtime.staff, runtime.organizations)
+    skills = ShermanSkillControlService(runtime)
     server = ControlPlaneHTTPServer(("127.0.0.1", 0), ControlPlaneService(runtime), config.api_token)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -91,7 +93,7 @@ def test_authenticated_skill_import_recommend_and_assign_is_explicit(tmp_path) -
         accounting = next(item for item in imported["skills"] if item["skill_id"] == "odoo-accounting-review")
         version_id = accounting["version_id"]
         assert accounting["status"] == "pending"
-        assert runtime.resolve_assigned_skills("staff-financial-accountant") == ()
+        assert skills.resolve_for_staff("staff-financial-accountant") == []
 
         recommend = _json_request(
             f"http://{host}:{port}/api/v1/skills/{version_id}/recommendations",
@@ -102,7 +104,7 @@ def test_authenticated_skill_import_recommend_and_assign_is_explicit(tmp_path) -
             recommendation = json.load(response)
         assert "staff-financial-accountant" in recommendation["staff_ids"]
         assert recommendation["activated"] is False
-        assert runtime.resolve_assigned_skills("staff-financial-accountant") == ()
+        assert skills.resolve_for_staff("staff-financial-accountant") == []
 
         assign = _json_request(
             f"http://{host}:{port}/api/v1/skills/{version_id}/assignments",
@@ -114,9 +116,9 @@ def test_authenticated_skill_import_recommend_and_assign_is_explicit(tmp_path) -
 
         assert assignment["activated"] is True
         assert "staff-financial-accountant" in assignment["staff_ids"]
-        resolved = runtime.resolve_assigned_skills("staff-financial-accountant")
+        resolved = skills.resolve_for_staff("staff-financial-accountant")
         assert len(resolved) == 1
-        assert resolved[0].version_id == version_id
+        assert resolved[0]["version_id"] == version_id
         assert any(event.event_type == "skill.imported" for event in runtime.audit.list_recent(limit=100))
         assert any(event.event_type == "skill.training_assigned" for event in runtime.audit.list_recent(limit=100))
     finally:
