@@ -3,13 +3,16 @@ from __future__ import annotations
 import secrets
 import threading
 from dataclasses import asdict
+from datetime import date
+from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping
 
 from nemotron.staff.application.direct_instructions import SubmitDirectInstructionRequest
 from nemotron.staff.application.ports import GovernanceAuditEvent
 from nemotron.staff.application.tool_gateway import PrepareToolExecutionRequest
 from nemotron.staff.domain import PermissionDenied
-from nemotron.staff.domain.runtime import MemoryEntry, MemoryScope
+from nemotron.staff.domain.runtime import MemoryEntry, MemoryScope, RuntimeError as StaffRuntimeError
+from nemotron.staff.workflows.bank_reconciliation import BankTransaction
 
 from .runtime import ProductionRuntime
 
@@ -28,6 +31,112 @@ class ControlPlaneService:
 
     def config_summary(self) -> dict[str, object]:
         return self.runtime.config.redacted_summary()
+
+    def review_bank_reconciliation(
+        self,
+        *,
+        bank_statement_reference: str,
+        bank_account_code: str,
+        start_date: str,
+        end_date: str,
+        transactions: list[Mapping[str, Any]],
+        actor_id: str = "control-plane",
+    ) -> dict[str, Any]:
+        """Persist normalized bank evidence and produce a read-only, draft reconciliation report."""
+        reviewer = self.runtime.review_bank_reconciliation
+        if reviewer is None:
+            raise StaffRuntimeError(
+                "Bank reconciliation is not configured; enable an approved reconciliation source first."
+            )
+
+        statement_reference = bank_statement_reference.strip()
+        account_code = bank_account_code.strip()
+        actor = actor_id.strip() or "control-plane"
+        if not statement_reference:
+            raise ValueError("bank_statement_reference is required.")
+        if not account_code:
+            raise ValueError("bank_account_code is required.")
+        if not transactions:
+            raise ValueError("At least one normalized bank transaction is required.")
+        try:
+            period_start = date.fromisoformat(start_date)
+            period_end = date.fromisoformat(end_date)
+        except ValueError as exc:
+            raise ValueError("start_date and end_date must use ISO YYYY-MM-DD format.") from exc
+        if period_end < period_start:
+            raise ValueError("end_date cannot precede start_date.")
+
+        normalized: list[BankTransaction] = []
+        for index, row in enumerate(transactions, start=1):
+            if not isinstance(row, Mapping):
+                raise ValueError(f"transactions[{index}] must be a JSON object.")
+            transaction_id = str(row.get("transaction_id", "")).strip()
+            currency = str(row.get("currency", "")).strip()
+            source_reference = str(row.get("source_reference", "")).strip()
+            if not transaction_id or not currency or not source_reference:
+                raise ValueError(
+                    f"transactions[{index}] requires transaction_id, currency, and source_reference."
+                )
+            try:
+                transaction_date = date.fromisoformat(str(row.get("transaction_date", "")))
+            except ValueError as exc:
+                raise ValueError(
+                    f"transactions[{index}].transaction_date must use ISO YYYY-MM-DD format."
+                ) from exc
+            try:
+                amount = Decimal(str(row.get("amount", "")))
+            except (InvalidOperation, ValueError) as exc:
+                raise ValueError(f"transactions[{index}].amount must be a decimal number.") from exc
+            if not amount.is_finite():
+                raise ValueError(f"transactions[{index}].amount must be finite.")
+            partner_value = row.get("partner")
+            partner = str(partner_value).strip() if partner_value is not None else None
+            normalized.append(
+                BankTransaction(
+                    transaction_id=transaction_id,
+                    transaction_date=transaction_date,
+                    amount=amount,
+                    currency=currency,
+                    reference=str(row.get("reference", "")).strip(),
+                    partner=partner or None,
+                    source_reference=source_reference,
+                )
+            )
+
+        persisted = tuple(normalized)
+        self.runtime.bank_statements.replace_statement(statement_reference, persisted)
+        self.runtime.audit.append(
+            GovernanceAuditEvent(
+                "bank_reconciliation.statement_loaded",
+                "bank_statement",
+                statement_reference,
+                actor,
+                self.runtime.clock.now(),
+                f"transactions={len(persisted)}; account={account_code}",
+            )
+        )
+
+        report = reviewer(
+            bank_statement_reference=statement_reference,
+            bank_account_code=account_code,
+            start_date=period_start,
+            end_date=period_end,
+        )
+        self.runtime.audit.append(
+            GovernanceAuditEvent(
+                "bank_reconciliation.review_generated",
+                "bank_statement",
+                statement_reference,
+                actor,
+                self.runtime.clock.now(),
+                (
+                    f"matched={report.matched_count}; review={report.review_count}; "
+                    f"unmatched={report.unmatched_count}; ambiguous={report.ambiguous_count}; "
+                    "draft_only=true"
+                ),
+            )
+        )
+        return report.to_review_dict()
 
     def approval_inbox(self) -> list[dict[str, Any]]:
         return [asdict(item) for item in self.runtime.queries.approval_inbox()]
