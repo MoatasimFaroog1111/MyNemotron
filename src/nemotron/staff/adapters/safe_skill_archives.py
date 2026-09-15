@@ -32,8 +32,6 @@ class ArchiveSafetyLimits:
             self.max_files,
         ) < 1:
             raise ValueError("Archive safety limits must be positive.")
-        if self.max_skill_manifest_bytes > self.max_file_bytes:
-            raise ValueError("max_skill_manifest_bytes cannot exceed max_file_bytes.")
         if self.max_nested_depth < 0:
             raise ValueError("max_nested_depth cannot be negative.")
 
