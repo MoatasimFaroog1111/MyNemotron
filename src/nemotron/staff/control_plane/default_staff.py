@@ -33,53 +33,52 @@ DEFAULT_STAFF: tuple[DefaultStaffSpec, ...] = (
     DefaultStaffSpec("staff-bank-reconciliation", "وكيل التسويات البنكية", "التسويات البنكية", "finance", "المالية", "أخصائي تسويات بنكية"),
     DefaultStaffSpec("staff-financial-reporting", "وكيل التقارير المالية", "التقارير المالية", "finance", "المالية", "أخصائي تقارير مالية"),
     DefaultStaffSpec("staff-customer-support", "وكيل دعم العملاء", "دعم العملاء", "support", "دعم العملاء", "أخصائي دعم العملاء"),
+    DefaultStaffSpec("staff-sherman-trainer", "الشيرمان", "مدرب المهارات", "training", "التدريب والتمكين", "مدرب المهارات"),
 )
 
 DEFAULT_ORGANIZATION_ID = "mynemotron-office"
+
+
+def _required_permissions(spec: DefaultStaffSpec) -> tuple[Permission, ...]:
+    if spec.staff_id == "staff-sherman-trainer":
+        return (
+            Permission(action="read", resource="staff-directory", max_risk=RiskLevel.LOW),
+            Permission(action="skill.import", resource="skill-registry", max_risk=RiskLevel.MEDIUM),
+            Permission(action="skill.assign", resource="skill-training", max_risk=RiskLevel.MEDIUM),
+        )
+    return (
+        Permission(action="read", resource="*", max_risk=RiskLevel.LOW),
+        Permission(action="memory.read", resource="staff-memory", max_risk=RiskLevel.LOW),
+    )
 
 
 def ensure_default_staff_roster(
     staff: SQLiteStaffRepository,
     organizations: SQLiteOrganizationRepository,
 ) -> None:
-    """Ensure the office always has a real, least-privilege StaffMember per visible seat.
-
-    The bootstrap is additive and idempotent. Existing custom StaffMember records are
-    never overwritten. Existing members created by this default roster are upgraded
-    only with the LOW-risk staff-memory read permission required by the governed
-    reasoning worker.
-    """
+    """Ensure the office has additive, idempotent, least-privilege default staff."""
 
     existing_by_id = {member.staff_id: member for member in staff.list_all()}
-    read_only = Permission(action="read", resource="*", max_risk=RiskLevel.LOW)
-    memory_read = Permission(action="memory.read", resource="staff-memory", max_risk=RiskLevel.LOW)
-
     for spec in DEFAULT_STAFF:
         expected_role_id = f"role-{spec.staff_id.removeprefix('staff-')}"
+        required = _required_permissions(spec)
         existing = existing_by_id.get(spec.staff_id)
         if existing is None:
             staff.save(
                 StaffMember(
                     staff_id=spec.staff_id,
                     display_name=spec.display_name,
-                    role=Role(
-                        role_id=expected_role_id,
-                        name=spec.role_name,
-                        permissions=(read_only, memory_read),
-                    ),
+                    role=Role(role_id=expected_role_id, name=spec.role_name, permissions=required),
                 )
             )
             continue
-
         if existing.role.role_id != expected_role_id:
             continue
-        has_memory_read = any(
-            permission.action in {"memory.read", "*"}
-            and permission.resource in {"staff-memory", "*"}
-            and permission.max_risk.severity >= RiskLevel.LOW.severity
-            for permission in existing.role.permissions
+        current = {(item.action, item.resource, item.max_risk) for item in existing.role.permissions}
+        missing = tuple(
+            item for item in required if (item.action, item.resource, item.max_risk) not in current
         )
-        if has_memory_read:
+        if not missing:
             continue
         staff.save(
             StaffMember(
@@ -89,7 +88,7 @@ def ensure_default_staff_roster(
                 role=Role(
                     role_id=existing.role.role_id,
                     name=existing.role.name,
-                    permissions=(*existing.role.permissions, memory_read),
+                    permissions=(*existing.role.permissions, *missing),
                     approval_limit=existing.role.approval_limit,
                 ),
             )
@@ -97,7 +96,6 @@ def ensure_default_staff_roster(
 
     organization_by_id = {item.organization_id: item for item in organizations.list_all()}
     existing = organization_by_id.get(DEFAULT_ORGANIZATION_ID)
-
     departments = list(existing.departments if existing else ())
     department_ids = {department.department_id for department in departments}
     for spec in DEFAULT_STAFF:
