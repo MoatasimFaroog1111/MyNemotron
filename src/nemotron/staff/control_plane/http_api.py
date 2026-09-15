@@ -125,7 +125,7 @@ class ControlPlaneRequestHandler(legacy.ControlPlaneRequestHandler):
         if not separator or not version_id or action not in {"recommendations", "assignments", "deactivate"}:
             return False
         payload = self._read_json()
-        actor_id = str(payload.get("actor_id", "staff-sherman-trainer" if ui else "control-plane"))
+        actor_id = "staff-sherman-trainer" if ui else "control-plane"
         skills = self._skills()
         if action == "recommendations":
             result = skills.recommend(version_id, actor_id=actor_id)
