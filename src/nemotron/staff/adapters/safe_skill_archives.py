@@ -19,6 +19,7 @@ class ArchiveSafetyLimits:
     max_upload_bytes: int = 25 * 1024 * 1024
     max_total_uncompressed_bytes: int = 100 * 1024 * 1024
     max_file_bytes: int = 10 * 1024 * 1024
+    max_skill_manifest_bytes: int = 64 * 1024
     max_files: int = 2_000
     max_nested_depth: int = 2
 
@@ -27,9 +28,12 @@ class ArchiveSafetyLimits:
             self.max_upload_bytes,
             self.max_total_uncompressed_bytes,
             self.max_file_bytes,
+            self.max_skill_manifest_bytes,
             self.max_files,
         ) < 1:
             raise ValueError("Archive safety limits must be positive.")
+        if self.max_skill_manifest_bytes > self.max_file_bytes:
+            raise ValueError("max_skill_manifest_bytes cannot exceed max_file_bytes.")
         if self.max_nested_depth < 0:
             raise ValueError("max_nested_depth cannot be negative.")
 
@@ -288,8 +292,11 @@ class SafeSkillArchiveInspector:
             return self._reject(filename, kind, digest, "SKILL.md frontmatter not found")
         skills: list[SkillDefinition] = []
         for path in skill_paths:
+            manifest = files[path]
+            if len(manifest) > self.limits.max_skill_manifest_bytes:
+                return self._reject(filename, kind, digest, "SKILL.md size exceeds safety limit")
             try:
-                name, description, instructions = self._parse_skill(files[path].decode("utf-8"))
+                name, description, instructions = self._parse_skill(manifest.decode("utf-8"))
             except (UnicodeDecodeError, ValueError) as exc:
                 return self._reject(filename, kind, digest, f"invalid SKILL.md frontmatter: {exc}")
             parent = path.rsplit("/", 1)[0] if "/" in path else ""
