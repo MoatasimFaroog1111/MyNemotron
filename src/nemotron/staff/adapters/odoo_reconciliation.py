@@ -24,6 +24,7 @@ class OdooSearchReadPort(Protocol):
         fields: tuple[str, ...],
         *,
         limit: int,
+        order: str | None = None,
     ) -> Sequence[dict[str, Any]]:
         """Execute a read-only Odoo search_read query."""
 
@@ -42,11 +43,18 @@ class OdooReadClient:
         fields: tuple[str, ...],
         *,
         limit: int,
+        order: str | None = None,
     ) -> Sequence[dict[str, Any]]:
         if model not in self._models:
             raise ValueError(f"Odoo model {model!r} is not allowlisted for read-only reconciliation.")
         if limit < 1 or limit > 5000:
             raise ValueError("Odoo reconciliation read limit must be between 1 and 5000.")
+        kwargs: dict[str, Any] = {"fields": list(fields), "limit": limit}
+        if order is not None:
+            normalized_order = order.strip()
+            if not normalized_order:
+                raise ValueError("Odoo reconciliation order cannot be empty.")
+            kwargs["order"] = normalized_order
         payload = {
             "jsonrpc": "2.0",
             "method": "call",
@@ -60,7 +68,7 @@ class OdooReadClient:
                     model,
                     "search_read",
                     [domain],
-                    {"fields": list(fields), "limit": limit},
+                    kwargs,
                 ],
             },
             "id": 1,
@@ -88,8 +96,10 @@ class OdooReadClient:
 
 
 class OdooLedgerEntrySource:
-    """Map read-only account.move.line rows into normalized reconciliation evidence."""
+    """Map complete, read-only account.move.line evidence into normalized reconciliation rows."""
 
+    _PAGE_SIZE = 2000
+    _MAX_PAGES = 100
     _FIELDS = (
         "id",
         "date",
@@ -118,13 +128,59 @@ class OdooLedgerEntrySource:
             raise ValueError("Bank account code is required.")
         if end_date < start_date:
             raise ValueError("Reconciliation end date cannot precede start date.")
-        domain: list[object] = [
+
+        base_domain: list[object] = [
             ["account_id.code", "=", account_code],
             ["date", ">=", start_date.isoformat()],
             ["date", "<=", end_date.isoformat()],
         ]
-        rows = self._reader.search_read("account.move.line", domain, self._FIELDS, limit=2000)
+        rows = self._read_all_pages(base_domain)
         return tuple(self._map_row(row, account_code) for row in rows)
+
+    def _read_all_pages(self, base_domain: list[object]) -> tuple[dict[str, Any], ...]:
+        """Read with deterministic id keyset pagination and fail closed on non-progress."""
+        collected: list[dict[str, Any]] = []
+        seen_ids: set[int] = set()
+        last_id = 0
+
+        for _page_number in range(1, self._MAX_PAGES + 1):
+            domain = list(base_domain)
+            if last_id:
+                domain.append(["id", ">", last_id])
+            page = tuple(
+                self._reader.search_read(
+                    "account.move.line",
+                    domain,
+                    self._FIELDS,
+                    limit=self._PAGE_SIZE,
+                    order="id asc",
+                )
+            )
+            if not page:
+                return tuple(collected)
+
+            previous_id = last_id
+            for row in page:
+                raw_id = row.get("id")
+                try:
+                    record_id = int(raw_id)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("Odoo reconciliation page contains a non-numeric record id.") from exc
+                if record_id <= previous_id or record_id in seen_ids:
+                    raise ValueError(
+                        "Odoo reconciliation pagination did not advance monotonically; refusing a partial report."
+                    )
+                previous_id = record_id
+                seen_ids.add(record_id)
+
+            collected.extend(page)
+            last_id = previous_id
+            if len(page) < self._PAGE_SIZE:
+                return tuple(collected)
+
+        raise ValueError(
+            "Odoo reconciliation pagination exceeded the safety page limit; refusing a potentially partial report."
+        )
 
     @classmethod
     def _map_row(cls, row: dict[str, Any], account_code: str) -> LedgerEntry:
