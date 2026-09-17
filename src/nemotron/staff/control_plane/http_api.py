@@ -79,9 +79,47 @@ class ControlPlaneRequestHandler(legacy.ControlPlaneRequestHandler):
             return True
         return False
 
+    def _handle_evaluation_get(self, path: str) -> bool:
+        if path == "/api/v1/evaluations/staff":
+            self._write_json(
+                legacy.HTTPStatus.OK,
+                {"items": self.server.service.evaluation_staff_reports()},
+            )
+            return True
+
+        staff_prefix = "/api/v1/evaluations/staff/"
+        if path.startswith(staff_prefix):
+            staff_id = legacy.unquote(path.removeprefix(staff_prefix).strip("/"))
+            if not staff_id or "/" in staff_id:
+                raise ValueError("Invalid staff id.")
+            self._write_json(
+                legacy.HTTPStatus.OK,
+                self.server.service.evaluation_staff_report(staff_id),
+            )
+            return True
+
+        report_prefix = "/api/v1/evaluations/reports/"
+        if path.startswith(report_prefix):
+            report_id = legacy.unquote(path.removeprefix(report_prefix).strip("/"))
+            if not report_id or "/" in report_id:
+                raise ValueError("Invalid report id.")
+            self._write_json(
+                legacy.HTTPStatus.OK,
+                self.server.service.evaluation_report(report_id),
+            )
+            return True
+        return False
+
     def do_GET(self) -> None:  # noqa: N802
         try:
             parsed = legacy.urlparse(self.path)
+            if parsed.path.startswith("/api/v1/evaluations/"):
+                if not self._require_auth():
+                    return
+                if not self._rate_limit("read", limit=self._config.api_read_rpm):
+                    return
+                if self._handle_evaluation_get(parsed.path):
+                    return
             if parsed.path.startswith("/ui/api/") and (
                 parsed.path == "/ui/api/skills" or parsed.path.endswith("/skills")
             ):
@@ -144,9 +182,25 @@ class ControlPlaneRequestHandler(legacy.ControlPlaneRequestHandler):
         self._write_json(legacy.HTTPStatus.OK, result)
         return True
 
+    def _reject_evaluation_write(self, path: str) -> bool:
+        if not path.startswith("/api/v1/evaluations"):
+            return False
+        if not self._require_auth():
+            return True
+        if not self._rate_limit("write", limit=self._config.api_write_rpm):
+            return True
+        self._write_json(
+            legacy.HTTPStatus.METHOD_NOT_ALLOWED,
+            {"error": "method_not_allowed"},
+            extra_headers={"Allow": "GET"},
+        )
+        return True
+
     def do_POST(self) -> None:  # noqa: N802
         try:
             parsed = legacy.urlparse(self.path)
+            if self._reject_evaluation_write(parsed.path):
+                return
             if parsed.path.startswith("/ui/api/skills"):
                 if not self._require_ui_auth():
                     return
@@ -168,6 +222,25 @@ class ControlPlaneRequestHandler(legacy.ControlPlaneRequestHandler):
             self._handle_error(exc)
             return
         super().do_POST()
+
+    def _write_method_only(self) -> None:
+        try:
+            parsed = legacy.urlparse(self.path)
+            if self._reject_evaluation_write(parsed.path):
+                return
+        except Exception as exc:
+            self._handle_error(exc)
+            return
+        self.send_error(legacy.HTTPStatus.NOT_IMPLEMENTED.value, f"Unsupported method ({self.command})")
+
+    def do_PUT(self) -> None:  # noqa: N802
+        self._write_method_only()
+
+    def do_PATCH(self) -> None:  # noqa: N802
+        self._write_method_only()
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        self._write_method_only()
 
 
 def serve(service: legacy.ControlPlaneService, *, host: str, port: int, api_token: str) -> None:
