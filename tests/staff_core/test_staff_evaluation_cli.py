@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from io import StringIO
 from pathlib import Path
 
 from nemotron.staff.application.worker_ports import (
@@ -10,6 +11,7 @@ from nemotron.staff.application.worker_ports import (
 )
 from nemotron.staff.control_plane.config import ControlPlaneConfig
 from nemotron.staff.domain.staff_evaluation import EvaluationRunMode
+from nemotron.staff.evaluation.run import main as planned_evaluation_main
 from nemotron.staff.evaluation_cli import EvaluationCLIOptions, run_evaluation_command
 
 
@@ -195,3 +197,41 @@ def test_live_cli_uses_isolated_governed_runner_and_returns_production_ready(tmp
     assert payload["mode"] == "live"
     assert payload["ready"] is True
     assert payload["staff"][0]["readiness_status"] == "production_ready"
+
+
+def test_planned_entry_point_runs_one_staff_in_contract_mode(tmp_path) -> None:
+    eval_root = tmp_path / "evals"
+    output_dir = tmp_path / "single-reports"
+    _write_suite(eval_root)
+    stdout = StringIO()
+    stderr = StringIO()
+
+    exit_code = planned_evaluation_main(
+        [
+            "--staff",
+            "staff-data-analyst",
+            "--mode",
+            "contract",
+            "--suite",
+            "gold-v1",
+            "--format",
+            "json",
+            "--eval-root",
+            str(eval_root),
+            "--output-dir",
+            str(output_dir),
+            "--run-id",
+            "single-contract-001",
+        ],
+        environ={},
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert exit_code == 0, stderr.getvalue()
+    payload = json.loads(stdout.getvalue())
+    assert payload["staff_id"] == "staff-data-analyst"
+    assert payload["sample_size"] == 20
+    assert payload["mode"] == "contract"
+    assert payload["ready"] is False
+    assert payload["status"] == "contract_passed"
