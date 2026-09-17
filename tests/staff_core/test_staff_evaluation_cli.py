@@ -235,3 +235,62 @@ def test_planned_entry_point_runs_one_staff_in_contract_mode(tmp_path) -> None:
     assert payload["mode"] == "contract"
     assert payload["ready"] is False
     assert payload["status"] == "contract_passed"
+
+
+def test_planned_entry_point_accepts_custom_report_db(tmp_path) -> None:
+    eval_root = tmp_path / "evals"
+    output_dir = tmp_path / "custom-reports"
+    report_db = tmp_path / "persistent" / "gold-holdout.sqlite3"
+    _write_suite(eval_root)
+    stdout = StringIO()
+    stderr = StringIO()
+
+    exit_code = planned_evaluation_main(
+        [
+            "--staff",
+            "staff-data-analyst",
+            "--mode",
+            "contract",
+            "--format",
+            "json",
+            "--eval-root",
+            str(eval_root),
+            "--output-dir",
+            str(output_dir),
+            "--report-db",
+            str(report_db),
+            "--run-id",
+            "custom-db-001",
+        ],
+        environ={},
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert exit_code == 0, stderr.getvalue()
+    assert report_db.is_file()
+
+
+def test_resume_run_id_is_rejected_outside_all_live_mode(tmp_path) -> None:
+    eval_root = tmp_path / "evals"
+    _write_suite(eval_root)
+    stdout = StringIO()
+    stderr = StringIO()
+
+    exit_code = planned_evaluation_main(
+        [
+            "--all",
+            "--mode",
+            "contract",
+            "--eval-root",
+            str(eval_root),
+            "--resume-run-id",
+            "previous-live-run",
+        ],
+        environ={},
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert exit_code == 2
+    assert "resume-run-id" in stderr.getvalue()
