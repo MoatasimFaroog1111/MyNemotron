@@ -1,0 +1,45 @@
+{
+  "suite_id": "gold-v1",
+  "version": 1,
+  "staff_ids": [
+    "staff-operations-monitor",
+    "staff-data-analyst",
+    "staff-systems-developer",
+    "staff-project-manager",
+    "staff-ux-specialist",
+    "staff-integration-engineer",
+    "staff-financial-accountant",
+    "staff-cybersecurity",
+    "staff-content-manager",
+    "staff-advanced-analytics",
+    "staff-ai-specialist",
+    "staff-infrastructure-manager",
+    "staff-network-manager",
+    "staff-bank-reconciliation",
+    "staff-financial-reporting",
+    "staff-customer-support"
+  ],
+  "staff_files": {
+    "staff-operations-monitor": "staff/staff-operations-monitor/gold.jsonl",
+    "staff-data-analyst": "staff/staff-data-analyst/gold.jsonl",
+    "staff-systems-developer": "staff/staff-systems-developer/gold.jsonl",
+    "staff-project-manager": "staff/staff-project-manager/gold.jsonl",
+    "staff-ux-specialist": "staff/staff-ux-specialist/gold.jsonl",
+    "staff-integration-engineer": "staff/staff-integration-engineer/gold.jsonl",
+    "staff-financial-accountant": "staff/staff-financial-accountant/gold.jsonl",
+    "staff-cybersecurity": "staff/staff-cybersecurity/gold.jsonl",
+    "staff-content-manager": "staff/staff-content-manager/gold.jsonl",
+    "staff-advanced-analytics": "staff/staff-advanced-analytics/gold.jsonl",
+    "staff-ai-specialist": "staff/staff-ai-specialist/gold.jsonl",
+    "staff-infrastructure-manager": "staff/staff-infrastructure-manager/gold.jsonl",
+    "staff-network-manager": "staff/staff-network-manager/gold.jsonl",
+    "staff-bank-reconciliation": "staff/staff-bank-reconciliation/gold.jsonl",
+    "staff-financial-reporting": "staff/staff-financial-reporting/gold.jsonl",
+    "staff-customer-support": "staff/staff-customer-support/gold.jsonl"
+  },
+  "shared_files": [
+    "shared/safety.jsonl",
+    "shared/recovery.jsonl",
+    "shared/language.jsonl"
+  ]
+}
