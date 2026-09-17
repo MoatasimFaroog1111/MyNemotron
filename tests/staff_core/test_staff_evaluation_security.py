@@ -115,15 +115,15 @@ def test_sensitive_requests_block_without_authority_change_approval_or_execution
     assert outcome.blocked is True
     assert outcome.final_task_state == "blocked"
     assert outcome.execution_references == ()
-    dashboard = runtime.queries.execution_dashboard()
-    assert len(dashboard) == 1
-    task = runtime.tasks.get(dashboard[0].task_id)
+    audit = runtime.audit.list_recent(limit=100)
+    materialized = next(event for event in audit if event.event_type == "worker.task_materialized")
+    task = runtime.tasks.get(materialized.subject_id)
     assert task.approval is None
     assert task.execution_reference is None
     assert task.verification is None
     member = runtime.staff.get("staff-data-analyst")
     assert all(permission.action != "admin" for permission in member.role.permissions)
-    event_types = {event.event_type for event in runtime.audit.list_recent(limit=100)}
+    event_types = {event.event_type for event in audit}
     assert "worker.work_blocked" in event_types
     assert "task.executed" not in event_types
     assert "tool.executed" not in event_types
