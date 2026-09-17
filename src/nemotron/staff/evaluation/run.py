@@ -51,7 +51,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--format", choices=("human", "json"), default="human")
     parser.add_argument("--eval-root", default="evals")
     parser.add_argument("--output-dir", default="evaluation-reports")
-    parser.add_argument("--run-id")
+    run_identity = parser.add_mutually_exclusive_group()
+    run_identity.add_argument("--run-id")
+    run_identity.add_argument("--resume-run-id")
+    parser.add_argument("--report-db")
     parser.add_argument("--git-sha")
     parser.add_argument("--model-id")
     return parser
@@ -105,6 +108,7 @@ def _run_single_staff(
     run_id: str,
     git_sha: str | None,
     model_id: str | None,
+    report_db_path: Path | None,
     environ: Mapping[str, str],
 ) -> tuple[dict[str, object], int]:
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -115,7 +119,12 @@ def _run_single_staff(
     if staff_id not in manifest.staff_ids:
         raise ValueError(f"staff_id is not present in the evaluation manifest: {staff_id}")
 
-    reports_db_path = output_dir.resolve() / "staff-evaluation.sqlite3"
+    reports_db_path = (
+        report_db_path.resolve()
+        if report_db_path is not None
+        else output_dir.resolve() / "staff-evaluation.sqlite3"
+    )
+    reports_db_path.parent.mkdir(parents=True, exist_ok=True)
     reports = SQLiteStaffEvaluationReportRepository(reports_db_path)
     audit = SQLiteAuditLog(SQLiteControlStore(reports_db_path))
     clock = UtcClock()
@@ -162,10 +171,7 @@ def _run_single_staff(
     payload = _single_staff_payload(report, status=status, exit_code=exit_code)
     report_path = output_dir.resolve() / f"{run_id}.json"
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
-    try:
-        report_path.write_text(encoded, encoding="utf-8", errors="strict")
-    except OSError:
-        raise
+    report_path.write_text(encoded, encoding="utf-8", errors="strict")
     return payload, exit_code
 
 
@@ -182,8 +188,12 @@ def main(
     args = _parser().parse_args(argv)
 
     mode = EvaluationRunMode(args.mode)
-    run_id = args.run_id or _default_run_id(mode, env)
+    if args.resume_run_id and (not args.all or mode is not EvaluationRunMode.LIVE):
+        print("--resume-run-id is valid only with --all --mode live", file=err)
+        return 2
+    run_id = args.resume_run_id or args.run_id or _default_run_id(mode, env)
     git_sha = args.git_sha or env.get("GITHUB_SHA")
+    report_db_path = Path(args.report_db) if args.report_db else None
     try:
         if args.staff:
             payload, exit_code = _run_single_staff(
@@ -195,6 +205,7 @@ def main(
                 run_id=run_id,
                 git_sha=git_sha,
                 model_id=args.model_id,
+                report_db_path=report_db_path,
                 environ=env,
             )
             if args.format == "json":
@@ -215,6 +226,7 @@ def main(
                 run_id=run_id,
                 git_sha=git_sha,
                 model_id=args.model_id,
+                reports_db_path=report_db_path,
             )
         )
     except Exception as exc:
