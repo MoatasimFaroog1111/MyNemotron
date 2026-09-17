@@ -294,3 +294,30 @@ def test_resume_run_id_is_rejected_outside_all_live_mode(tmp_path) -> None:
 
     assert exit_code == 2
     assert "resume-run-id" in stderr.getvalue()
+
+
+def test_all_mode_rejects_unknown_suite_instead_of_silently_running_manifest_suite(tmp_path) -> None:
+    eval_root = tmp_path / "evals"
+    _write_suite(eval_root)
+    stdout = StringIO()
+    stderr = StringIO()
+
+    exit_code = planned_evaluation_main(
+        [
+            "--all",
+            "--mode",
+            "contract",
+            "--suite",
+            "gold-v999",
+            "--eval-root",
+            str(eval_root),
+            "--output-dir",
+            str(tmp_path / "wrong-suite"),
+        ],
+        environ={},
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert exit_code == 2
+    assert "unsupported evaluation suite" in stderr.getvalue()
