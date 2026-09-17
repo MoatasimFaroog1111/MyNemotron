@@ -218,17 +218,21 @@ def main(
                 )
             return exit_code
 
-        result = run_evaluation_command(
-            EvaluationCLIOptions(
-                mode=mode,
-                eval_root=Path(args.eval_root),
-                output_dir=Path(args.output_dir),
-                run_id=run_id,
-                git_sha=git_sha,
-                model_id=args.model_id,
-                reports_db_path=report_db_path,
-            )
+        cases = JsonlStaffEvaluationCaseRepository(Path(args.eval_root).resolve())
+        manifest = cases.load_office_manifest()
+        if args.suite != manifest.suite_id:
+            raise ValueError(f"unsupported evaluation suite: {args.suite}")
+        options = EvaluationCLIOptions(
+            mode=mode,
+            eval_root=Path(args.eval_root),
+            output_dir=Path(args.output_dir),
+            run_id=run_id,
+            git_sha=git_sha,
+            model_id=args.model_id,
+            reports_db_path=report_db_path,
         )
+        config = ControlPlaneConfig.from_env(env) if mode is EvaluationRunMode.LIVE else None
+        result = run_evaluation_command(options, config=config)
     except Exception as exc:
         print(
             json.dumps(
