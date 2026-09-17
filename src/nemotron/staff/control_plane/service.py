@@ -32,6 +32,15 @@ class ControlPlaneService:
     def config_summary(self) -> dict[str, object]:
         return self.runtime.config.redacted_summary()
 
+    def evaluation_staff_reports(self, *, limit: int = 100) -> list[dict[str, object]]:
+        return self.runtime.evaluation_reports.list_staff(limit=limit)
+
+    def evaluation_staff_report(self, staff_id: str) -> dict[str, object]:
+        return self.runtime.evaluation_reports.latest_for_staff(staff_id)
+
+    def evaluation_report(self, report_id: str) -> dict[str, object]:
+        return self.runtime.evaluation_reports.report(report_id)
+
     def review_bank_reconciliation(
         self,
         *,
