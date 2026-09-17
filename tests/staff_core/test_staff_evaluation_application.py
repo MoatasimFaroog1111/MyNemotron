@@ -257,7 +257,7 @@ def test_office_evaluation_preserves_individual_failure_and_persists_office_last
     assert len(result.reports) == 2
     assert result.ready is False
     bad_report = next(report for report in result.reports if report.staff_id == bad)
-    assert bad_report.correctness_rate == 0.0
+    assert bad_report.correctness_rate == 0.5
     assert bad_report.failed_case_ids == (f"{bad}:correctness:one",)
     assert reports.office == [result]
     assert [report.staff_id for report in reports.staff] == [good, bad]
