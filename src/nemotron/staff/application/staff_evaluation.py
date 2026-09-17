@@ -229,7 +229,7 @@ class RunStaffEvaluation:
 
 
 class RunOfficeEvaluation:
-    """Run a staff evaluation for each configured primary employee without averaging away failures."""
+    """Run or resume a governed staff evaluation without averaging away failures."""
 
     def __init__(
         self,
@@ -269,6 +269,24 @@ class RunOfficeEvaluation:
             if not value.strip():
                 raise ValueError(f"{name} is required")
 
+        existing_office = self._reports.get_office(run_id)
+        if existing_office is not None:
+            _validate_resumed_office(
+                existing_office,
+                staff_ids=self._staff_ids,
+                suite_id=suite_id,
+                mode=mode,
+                model_id=model_id,
+                config_digest=config_digest,
+                git_sha=git_sha,
+            )
+            return existing_office
+
+        completed_staff = set(self._reports.list_completed_staff(run_id))
+        unexpected_staff = completed_staff.difference(self._staff_ids)
+        if unexpected_staff:
+            raise ValueError("office evaluation resume contains unexpected staff reports")
+
         staff_reports: list[StaffEvaluationReport] = []
         for staff_id in self._staff_ids:
             request = RunStaffEvaluationRequest(
@@ -280,6 +298,26 @@ class RunOfficeEvaluation:
                 config_digest=config_digest,
                 git_sha=git_sha,
             )
+            if staff_id in completed_staff:
+                existing = self._reports.get_staff(request.report_id)
+                if existing is None:
+                    raise ValueError("office evaluation resume index references a missing report")
+                _validate_resumed_staff(existing, request=request, office_run_id=run_id)
+                staff_reports.append(existing)
+                self._audit.append(
+                    GovernanceAuditEvent(
+                        "evaluation.staff_resumed",
+                        "evaluation_report",
+                        existing.report_id,
+                        "staff-evaluation",
+                        self._clock.now(),
+                        (
+                            f"staff_id={staff_id}; suite_id={suite_id}; "
+                            f"mode={mode.value}; office_run_id={run_id}"
+                        ),
+                    )
+                )
+                continue
             staff_reports.append(self._run_staff(request, office_run_id=run_id))
 
         report_tuple = tuple(staff_reports)
@@ -341,6 +379,53 @@ class CompareEvaluationRuns:
             blocked_rate_delta=right.blocked_rate - left.blocked_rate,
             average_cost_delta_usd=_optional_delta(left.average_cost_usd, right.average_cost_usd),
         )
+
+
+def _validate_resumed_staff(
+    report: StaffEvaluationReport,
+    *,
+    request: RunStaffEvaluationRequest,
+    office_run_id: str,
+) -> None:
+    compatible = (
+        report.report_id == request.report_id
+        and report.office_run_id == office_run_id
+        and report.staff_id == request.staff_id
+        and report.suite.suite_id == request.suite_id
+        and report.mode is request.mode
+        and report.model_id == request.model_id
+        and report.config_digest == request.config_digest
+        and report.git_sha == request.git_sha
+    )
+    if not compatible:
+        raise ValueError("completed evaluation report is incompatible with requested office run")
+
+
+def _validate_resumed_office(
+    report: OfficeEvaluationReport,
+    *,
+    staff_ids: tuple[str, ...],
+    suite_id: str,
+    mode: EvaluationRunMode,
+    model_id: str,
+    config_digest: str,
+    git_sha: str | None,
+) -> None:
+    if report.suite_id != suite_id or report.mode is not mode:
+        raise ValueError("completed office evaluation is incompatible with requested run")
+    if tuple(item.staff_id for item in report.reports) != staff_ids:
+        raise ValueError("completed office evaluation has an incompatible staff roster")
+    for item in report.reports:
+        request = RunStaffEvaluationRequest(
+            staff_id=item.staff_id,
+            suite_id=suite_id,
+            mode=mode,
+            report_id=f"{report.run_id}:{item.staff_id}",
+            model_id=model_id,
+            config_digest=config_digest,
+            git_sha=git_sha,
+        )
+        _validate_resumed_staff(item, request=request, office_run_id=report.run_id)
 
 
 def _sum_optional(values) -> int | None:  # type: ignore[no-untyped-def]
