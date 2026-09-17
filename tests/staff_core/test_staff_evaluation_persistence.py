@@ -13,6 +13,7 @@ from nemotron.staff.domain.staff_evaluation import (
     EvaluationRunMode,
     EvaluationSuiteIdentity,
     OfficeEvaluationReport,
+    ReadinessFailure,
     ReadinessResult,
     StaffCaseScore,
     StaffEvaluationReport,
@@ -75,7 +76,11 @@ def make_staff_report(
         cost_measured_cases=0,
         failed_case_ids=(),
         governance_violations=(),
-        readiness=ReadinessResult(False, "not_ready_insufficient_evidence", ()),
+        readiness=ReadinessResult(
+            False,
+            "not_ready_insufficient_evidence",
+            (ReadinessFailure.INSUFFICIENT_EVIDENCE,),
+        ),
         measured_at=measured_at,
     )
 
