@@ -38,6 +38,7 @@ class EvaluationCLIOptions:
     run_id: str
     git_sha: str | None
     model_id: str | None = None
+    reports_db_path: Path | None = None
 
     def __post_init__(self) -> None:
         if not self.run_id.strip() or _RUN_ID_PATTERN.fullmatch(self.run_id) is None:
@@ -72,7 +73,12 @@ def run_evaluation_command(
 
     cases = JsonlStaffEvaluationCaseRepository(eval_root)
     manifest = cases.load_office_manifest()
-    reports_db_path = output_dir / "staff-evaluation.sqlite3"
+    reports_db_path = (
+        Path(options.reports_db_path).resolve()
+        if options.reports_db_path is not None
+        else output_dir / "staff-evaluation.sqlite3"
+    )
+    reports_db_path.parent.mkdir(parents=True, exist_ok=True)
     reports = SQLiteStaffEvaluationReportRepository(reports_db_path)
     control_store = SQLiteControlStore(reports_db_path)
     audit = SQLiteAuditLog(control_store)
@@ -223,6 +229,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--git-sha")
     parser.add_argument("--model-id")
+    parser.add_argument("--report-db")
     return parser
 
 
@@ -243,6 +250,7 @@ def main(
         run_id=args.run_id,
         git_sha=args.git_sha or (environ or os.environ).get("GITHUB_SHA"),
         model_id=args.model_id,
+        reports_db_path=Path(args.report_db) if args.report_db else None,
     )
     try:
         config = None
