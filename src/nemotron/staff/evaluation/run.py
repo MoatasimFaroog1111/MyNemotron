@@ -1,13 +1,30 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
 from pathlib import Path
 from typing import Mapping, Sequence, TextIO
 
-from nemotron.staff.domain.staff_evaluation import EvaluationRunMode
+from nemotron.staff.adapters.contract_staff_evaluation import (
+    DeterministicContractStaffEvaluationRunner,
+)
+from nemotron.staff.adapters.governed_staff_evaluation import (
+    GovernedStaffEvaluationRunner,
+    IsolatedEvaluationRuntimeFactory,
+)
+from nemotron.staff.adapters.jsonl_staff_evaluation import JsonlStaffEvaluationCaseRepository
+from nemotron.staff.adapters.sqlite_control import SQLiteAuditLog, SQLiteControlStore
+from nemotron.staff.adapters.sqlite_staff_evaluation import SQLiteStaffEvaluationReportRepository
+from nemotron.staff.application.staff_evaluation import (
+    RunStaffEvaluation,
+    RunStaffEvaluationRequest,
+)
+from nemotron.staff.control_plane.config import ControlPlaneConfig
+from nemotron.staff.control_plane.runtime import UtcClock
+from nemotron.staff.domain.staff_evaluation import EvaluationRunMode, StaffEvaluationReport
 from nemotron.staff.evaluation_cli import EvaluationCLIOptions, run_evaluation_command
 
 
@@ -28,7 +45,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     target = parser.add_mutually_exclusive_group(required=True)
     target.add_argument("--all", action="store_true", help="Evaluate every staff member in the office manifest.")
-    target.add_argument("--staff", help="Reserved for a single-staff run; office CI uses --all.")
+    target.add_argument("--staff", help="Evaluate one staff member from the selected suite.")
     parser.add_argument("--mode", required=True, choices=tuple(mode.value for mode in EvaluationRunMode))
     parser.add_argument("--suite", default="gold-v1")
     parser.add_argument("--format", choices=("human", "json"), default="human")
@@ -38,6 +55,118 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--git-sha")
     parser.add_argument("--model-id")
     return parser
+
+
+def _config_digest(config: ControlPlaneConfig) -> str:
+    rendered = json.dumps(
+        config.redacted_summary(),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(rendered).hexdigest()
+
+
+def _single_staff_payload(report: StaffEvaluationReport, *, status: str, exit_code: int) -> dict[str, object]:
+    return {
+        "report_id": report.report_id,
+        "staff_id": report.staff_id,
+        "suite_id": report.suite.suite_id,
+        "dataset_digest": report.suite.dataset_digest,
+        "mode": report.mode.value,
+        "status": status,
+        "ready": report.readiness.ready,
+        "exit_code": exit_code,
+        "sample_size": report.sample_size,
+        "model_id": report.model_id,
+        "git_sha": report.git_sha,
+        "correctness_rate": report.correctness_rate,
+        "safety_pass_rate": report.safety_pass_rate,
+        "recovery_rate": report.recovery_rate,
+        "blocked_rate": report.blocked_rate,
+        "p50_latency_ms": report.p50_latency_ms,
+        "p95_latency_ms": report.p95_latency_ms,
+        "average_attempts": report.average_attempts,
+        "failed_case_ids": list(report.failed_case_ids),
+        "governance_violations": list(report.governance_violations),
+        "readiness_status": report.readiness.status,
+        "readiness_failures": [failure.value for failure in report.readiness.failures],
+        "measured_at": report.measured_at.isoformat(),
+    }
+
+
+def _run_single_staff(
+    *,
+    staff_id: str,
+    mode: EvaluationRunMode,
+    suite_id: str,
+    eval_root: Path,
+    output_dir: Path,
+    run_id: str,
+    git_sha: str | None,
+    model_id: str | None,
+    environ: Mapping[str, str],
+) -> tuple[dict[str, object], int]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    cases = JsonlStaffEvaluationCaseRepository(eval_root.resolve())
+    manifest = cases.load_office_manifest()
+    if suite_id != manifest.suite_id:
+        raise ValueError(f"unsupported evaluation suite: {suite_id}")
+    if staff_id not in manifest.staff_ids:
+        raise ValueError(f"staff_id is not present in the evaluation manifest: {staff_id}")
+
+    reports_db_path = output_dir.resolve() / "staff-evaluation.sqlite3"
+    reports = SQLiteStaffEvaluationReportRepository(reports_db_path)
+    audit = SQLiteAuditLog(SQLiteControlStore(reports_db_path))
+    clock = UtcClock()
+
+    if mode is EvaluationRunMode.CONTRACT:
+        runner = DeterministicContractStaffEvaluationRunner()
+        selected_model_id = model_id or "contract-fixture"
+        config_digest = hashlib.sha256(b"staff-evaluation-contract-cli-v1").hexdigest()
+    else:
+        config = ControlPlaneConfig.from_env(environ)
+        runner = GovernedStaffEvaluationRunner(
+            IsolatedEvaluationRuntimeFactory(
+                config,
+                evaluation_root=output_dir.resolve() / "runtime" / run_id,
+            )
+        )
+        selected_model_id = model_id or config.nemotron_model
+        config_digest = _config_digest(config)
+
+    run_staff = RunStaffEvaluation(
+        cases=cases,
+        runner=runner,
+        reports=reports,
+        clock=clock,
+        audit=audit,
+    )
+    report = run_staff(
+        RunStaffEvaluationRequest(
+            staff_id=staff_id,
+            suite_id=suite_id,
+            mode=mode,
+            report_id=f"{run_id}:{staff_id}",
+            model_id=selected_model_id,
+            config_digest=config_digest,
+            git_sha=git_sha,
+        )
+    )
+
+    if mode is EvaluationRunMode.CONTRACT:
+        passed = all(score.passed for score in report.scores) and not report.governance_violations
+        status, exit_code = (("contract_passed", 0) if passed else ("contract_failed", 1))
+    else:
+        status, exit_code = (("production_ready", 0) if report.readiness.ready else ("not_ready", 1))
+    payload = _single_staff_payload(report, status=status, exit_code=exit_code)
+    report_path = output_dir.resolve() / f"{run_id}.json"
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
+    try:
+        report_path.write_text(encoded, encoding="utf-8", errors="strict")
+    except OSError:
+        raise
+    return payload, exit_code
 
 
 def main(
@@ -52,23 +181,39 @@ def main(
     err = stderr or sys.stderr
     args = _parser().parse_args(argv)
 
-    if args.staff:
-        print("single-staff execution is not exposed by this compatibility entry point yet", file=err)
-        return 2
-    if args.suite != "gold-v1":
-        print(f"unsupported evaluation suite: {args.suite}", file=err)
-        return 2
-
     mode = EvaluationRunMode(args.mode)
     run_id = args.run_id or _default_run_id(mode, env)
+    git_sha = args.git_sha or env.get("GITHUB_SHA")
     try:
+        if args.staff:
+            payload, exit_code = _run_single_staff(
+                staff_id=args.staff,
+                mode=mode,
+                suite_id=args.suite,
+                eval_root=Path(args.eval_root),
+                output_dir=Path(args.output_dir),
+                run_id=run_id,
+                git_sha=git_sha,
+                model_id=args.model_id,
+                environ=env,
+            )
+            if args.format == "json":
+                print(json.dumps(payload, ensure_ascii=False, sort_keys=True), file=out)
+            else:
+                print(
+                    f"{mode.value}: {payload['status']}; staff={args.staff}; "
+                    f"cases={payload['sample_size']}; ready={str(payload['ready']).lower()}",
+                    file=out,
+                )
+            return exit_code
+
         result = run_evaluation_command(
             EvaluationCLIOptions(
                 mode=mode,
                 eval_root=Path(args.eval_root),
                 output_dir=Path(args.output_dir),
                 run_id=run_id,
-                git_sha=args.git_sha or env.get("GITHUB_SHA"),
+                git_sha=git_sha,
                 model_id=args.model_id,
             )
         )
