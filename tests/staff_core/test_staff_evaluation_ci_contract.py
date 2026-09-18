@@ -29,6 +29,12 @@ def test_live_gold_holdout_is_manual_only_and_not_pull_request_triggered() -> No
     assert "NEMOTRON_MODEL" in workflow
     assert "NEMOTRON_API_KEY" in workflow
     assert "staff-evaluation-live.json" in workflow
+    assert "Validate and prepare live evaluation environment" in workflow
+    assert "Missing required GitHub environment secret:" in workflow
+    assert "openssl rand -hex 24" in workflow
+    assert "openssl rand -hex 32" in workflow
+    assert "STAFF_CONTROL_API_TOKEN=" in workflow
+    assert "STAFF_CAPABILITY_HMAC_SECRET=" in workflow
 
 
 def test_planned_evaluation_module_entry_point_exists() -> None:
