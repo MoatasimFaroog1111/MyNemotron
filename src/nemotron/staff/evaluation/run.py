@@ -195,6 +195,10 @@ def main(
     git_sha = args.git_sha or env.get("GITHUB_SHA")
     report_db_path = Path(args.report_db) if args.report_db else None
     try:
+        if args.all:
+            manifest = JsonlStaffEvaluationCaseRepository(Path(args.eval_root).resolve()).load_office_manifest()
+            if args.suite != manifest.suite_id:
+                raise ValueError(f"unsupported evaluation suite: {args.suite}")
         if args.staff:
             payload, exit_code = _run_single_staff(
                 staff_id=args.staff,
