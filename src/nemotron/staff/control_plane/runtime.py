@@ -34,6 +34,7 @@ from nemotron.staff.adapters.sqlite_runtime import (
     SQLiteRuntimeStore,
 )
 from nemotron.staff.adapters.sqlite_skills import SQLiteSkillRegistry
+from nemotron.staff.adapters.sqlite_staff_evaluation import SQLiteStaffEvaluationReportRepository
 from nemotron.staff.adapters.sqlite_worker import SQLiteWorkerQueue
 from nemotron.staff.adapters.tools import (
     BrowserToolAdapter,
@@ -56,6 +57,7 @@ from nemotron.staff.application.direct_instructions import SubmitDirectInstructi
 from nemotron.staff.application.goals import CreateGoal
 from nemotron.staff.application.memory import ReadVisibleMemory, WriteMemory
 from nemotron.staff.application.planning import AcceptPlan, BuildPlanProposal
+from nemotron.staff.application.queue_staff_instruction import QueueStaffInstruction
 from nemotron.staff.application.runtime_ports import PlanningPort
 from nemotron.staff.application.skill_training import ResolveAssignedSkills
 from nemotron.staff.application.tool_gateway import ExecuteToolTask, InMemoryToolRegistry, PrepareToolExecution
@@ -77,6 +79,7 @@ from nemotron.staff.workflows.bank_reconciliation import BankReconciliationSourc
 from .backup import SQLiteBackupManager
 from .capability_gates import GatedToolRegistry
 from .config import ControlPlaneConfig
+from .evaluation_reports import EvaluationReportQueries
 from .queries import ControlPlaneQueries
 from .readiness import NemotronReadinessProbe
 
@@ -121,6 +124,7 @@ class ProductionRuntime:
     worker_model_id: str
     create_goal: CreateGoal
     submit_direct_instruction: SubmitDirectInstruction
+    queue_staff_instruction: QueueStaffInstruction
     write_memory: WriteMemory
     read_memory: ReadVisibleMemory
     build_plan: BuildPlanProposal
@@ -131,6 +135,8 @@ class ProductionRuntime:
     execute_tool_task: ExecuteToolTask
     verify_task: VerifyTask
     queries: ControlPlaneQueries
+    evaluation_report_store: SQLiteStaffEvaluationReportRepository
+    evaluation_reports: EvaluationReportQueries
     backups: SQLiteBackupManager
     nemotron_readiness: NemotronReadinessProbe
     registered_tools: tuple[str, ...]
@@ -345,6 +351,13 @@ def build_production_runtime(
         clock=clock,
         audit=audit,
     )
+    queue_staff_instruction = QueueStaffInstruction(
+        submit_direct_instruction=submit_direct_instruction,
+        memories=memories,
+        ids=ids,
+        clock=clock,
+        audit=audit,
+    )
     write_memory = WriteMemory(memories, staff, organizations, ids, clock, audit)
     build_plan = BuildPlanProposal(
         goals,
@@ -386,6 +399,10 @@ def build_production_runtime(
     )
     verify_task = VerifyTask(tasks, staff, policy, clock, audit)
     queries = ControlPlaneQueries(tasks, intents, idempotency, audit)
+    evaluation_report_store = SQLiteStaffEvaluationReportRepository(
+        config.data_dir / "staff-evaluation.sqlite3"
+    )
+    evaluation_reports = EvaluationReportQueries(evaluation_report_store)
     backups = SQLiteBackupManager(db_path, config.backup_dir, retention=config.backup_retention)
     nemotron_readiness = NemotronReadinessProbe(
         base_url=config.nemotron_base_url,
@@ -424,6 +441,7 @@ def build_production_runtime(
         worker_model_id=worker_model_id,
         create_goal=create_goal,
         submit_direct_instruction=submit_direct_instruction,
+        queue_staff_instruction=queue_staff_instruction,
         write_memory=write_memory,
         read_memory=read_memory,
         build_plan=build_plan,
@@ -434,6 +452,8 @@ def build_production_runtime(
         execute_tool_task=execute_tool_task,
         verify_task=verify_task,
         queries=queries,
+        evaluation_report_store=evaluation_report_store,
+        evaluation_reports=evaluation_reports,
         backups=backups,
         nemotron_readiness=nemotron_readiness,
         registered_tools=tuple(registered),

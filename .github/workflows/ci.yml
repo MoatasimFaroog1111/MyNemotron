@@ -17,7 +17,7 @@ jobs:
   quality:
     name: Python quality checks
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Checkout repository
@@ -54,8 +54,23 @@ jobs:
           PYTHONPATH: src
         run: python -m pytest -q tests/staff_core --junitxml=pytest-results.xml
 
+      - name: Staff Evaluation Contract
+        run: |
+          PYTHONPATH=src python -m nemotron.staff.evaluation.run --all --mode contract --format json > staff-evaluation-contract.json
+
       - name: Build Staff Control Plane container
         run: docker build --tag mynemotron-staff-ci .
+
+      - name: Upload Staff Evaluation Contract
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staff-evaluation-contract
+          path: |
+            staff-evaluation-contract.json
+            evaluation-reports/
+          if-no-files-found: ignore
+          retention-days: 30
 
       - name: Upload Staff Core test report
         if: always()

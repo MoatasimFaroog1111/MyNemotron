@@ -1,0 +1,52 @@
+name: Staff Evaluation Live Gold Holdout
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staff-eval-live
+  cancel-in-progress: false
+
+jobs:
+  live-gold-holdout:
+    name: Live Gold Holdout
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: staff-evaluation-live
+    env:
+      NEMOTRON_BASE_URL: ${{ secrets.NEMOTRON_BASE_URL }}
+      NEMOTRON_MODEL: ${{ secrets.NEMOTRON_MODEL }}
+      NEMOTRON_API_KEY: ${{ secrets.NEMOTRON_API_KEY }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install evaluation dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r deploy/staff-requirements.txt
+
+      - name: Run isolated live Gold Holdout
+        run: |
+          PYTHONPATH=src python -m nemotron.staff.evaluation.run --all --mode live --suite gold-v1 --format json > staff-evaluation-live.json
+
+      - name: Upload live evaluation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staff-evaluation-live
+          path: |
+            staff-evaluation-live.json
+            evaluation-reports/
+          if-no-files-found: ignore
+          retention-days: 30
