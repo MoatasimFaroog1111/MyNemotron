@@ -54,7 +54,7 @@ class _RetryOnceUIReasoner:
         )
 
 
-def _config(tmp_path) -> ControlPlaneConfig:  # type: ignore[no-untyped-def]
+def _config(tmp_path, *, worker_max_concurrency: int = 4) -> ControlPlaneConfig:  # type: ignore[no-untyped-def]
     return ControlPlaneConfig(
         data_dir=tmp_path / "data",
         files_root=tmp_path / "files",
@@ -66,6 +66,7 @@ def _config(tmp_path) -> ControlPlaneConfig:  # type: ignore[no-untyped-def]
         nemotron_model="nemotron-ui-test",
         worker_retry_initial_seconds=0,
         worker_retry_max_seconds=0,
+        worker_max_concurrency=worker_max_concurrency,
     )
 
 
@@ -75,8 +76,8 @@ def test_default_control_plane_worker_budget_is_bounded_for_interactive_response
     assert config.nemotron_worker_timeout_seconds == 45
 
 
-def _start_ui(tmp_path, reasoner=None):  # type: ignore[no-untyped-def]
-    config = _config(tmp_path)
+def _start_ui(tmp_path, reasoner=None, *, worker_max_concurrency: int = 4):  # type: ignore[no-untyped-def]
+    config = _config(tmp_path, worker_max_concurrency=worker_max_concurrency)
     runtime = build_production_runtime(config, reasoner=reasoner or _UIReasoner())
     member = StaffMember(
         "staff-ui-1",
@@ -291,6 +292,65 @@ def test_ui_instruction_processes_its_exact_work_item_without_draining_backlog(t
             item["work_item_id"] == old.work_item_id and item["status"] == "queued"
             for item in workspace["queued_work"]
         )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_ui_instruction_waits_for_worker_capacity_instead_of_being_abandoned(tmp_path) -> None:
+    config, runtime, server, thread, root = _start_ui(tmp_path, worker_max_concurrency=1)
+    try:
+        old = runtime.queue_staff_instruction(
+            QueueStaffInstructionRequest(
+                staff_id="staff-ui-1",
+                instruction="مهمة تحجز سعة العامل مؤقتاً.",
+                actor_id="ui-operator",
+            )
+        )
+        claimed_old = runtime.worker_queue.claim_work_item(
+            old.work_item_id,
+            staff_id="staff-ui-1",
+            at=runtime.clock.now(),
+        )
+        assert claimed_old is not None
+
+        cookie, _ = _login(root, config.api_token)
+        body = json.dumps({"instruction": "نفذ بعد توفر السعة."}, ensure_ascii=False).encode("utf-8")
+        request = urllib.request.Request(
+            root + "/ui/api/staff/staff-ui-1/instructions",
+            data=body,
+            headers={"Cookie": cookie, "Content-Type": "application/json", "Accept": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            assert response.status == 202
+            result = json.load(response)
+
+        time.sleep(0.15)
+        runtime.worker_queue.complete(
+            old.work_item_id,
+            staff_id="staff-ui-1",
+            expected_version=claimed_old.version,
+            at=runtime.clock.now(),
+            summary="released test capacity",
+        )
+
+        target = None
+        for _ in range(100):
+            request = urllib.request.Request(root + "/ui/api/staff/staff-ui-1/workspace", headers={"Cookie": cookie})
+            with urllib.request.urlopen(request, timeout=5) as response:
+                workspace = json.load(response)
+            target = next(
+                (item for item in workspace["tasks"] if item["task_id"] == result["execution"]["task_id"]),
+                None,
+            )
+            if target and target.get("decision"):
+                break
+            time.sleep(0.05)
+
+        assert target is not None
+        assert target["decision"]["rationale"] == "تم تحليل التعليمات التجريبية بنجاح."
     finally:
         server.shutdown()
         server.server_close()
