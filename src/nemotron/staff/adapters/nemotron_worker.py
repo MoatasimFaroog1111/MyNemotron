@@ -55,7 +55,7 @@ class NemotronWorkerConfig:
     model: str
     api_key: str | None = None
     timeout_seconds: int = 90
-    max_tokens: int = 600
+    max_tokens: int = 1200
     max_visible_memory: int = 8
 
     def __post_init__(self) -> None:
@@ -162,9 +162,13 @@ class NemotronWorkerReasoningAdapter:
         )
 
         try:
-            content = response_payload["choices"][0]["message"]["content"]
+            choice = response_payload["choices"][0]
+            content = choice["message"]["content"]
+            finish_reason = choice.get("finish_reason")
         except (KeyError, IndexError, TypeError) as exc:
             raise StaffRuntimeError("Nemotron worker response did not contain a chat-completion message.") from exc
+        if finish_reason == "length":
+            raise StaffRuntimeError("Nemotron worker response was truncated by the token limit.")
         return self.parse_content(content, context, allowed_memory_ids={entry.memory_id for entry in selected_memory})
 
     @staticmethod
