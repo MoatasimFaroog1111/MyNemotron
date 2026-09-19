@@ -458,6 +458,16 @@ class SQLiteWorkerQueue:
         finally:
             db.close()
 
+    def status(self, work_item_id: str) -> WorkStatus | None:
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT status FROM runtime_work_queue WHERE work_item_id = ?",
+                (work_item_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return WorkStatus(row["status"])
+
     def attempts(self, work_item_id: str) -> int:
         with self._connect() as db:
             row = db.execute(
