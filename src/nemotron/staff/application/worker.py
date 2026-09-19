@@ -184,21 +184,7 @@ class StaffWorkerEngine:
                 WorkerRunStatus.IDLE,
                 staff_id,
                 work_item_id=work_item_id,
-                task_id=self._materialize.task_id_for(
-                    WorkItem(
-                        work_item_id,
-                        "",
-                        "",
-                        "",
-                        "",
-                        "",
-                        "",
-                        "",
-                        RiskLevel.LOW,
-                        staff_id,
-                        self._clock.now(),
-                    )
-                ),
+                task_id=f"work-task:{work_item_id}",
                 detail="Target work item is not currently eligible.",
             )
         return self._run_claimed_item(staff_id, item)
