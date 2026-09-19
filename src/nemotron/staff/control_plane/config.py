@@ -49,7 +49,7 @@ class ControlPlaneConfig:
     backup_interval_seconds: int = 21600
     nemotron_readiness_timeout_seconds: int = 10
     nemotron_readiness_ttl_seconds: int = 120
-    nemotron_worker_max_tokens: int = 600
+    nemotron_worker_max_tokens: int = 1200
     nemotron_worker_memory_limit: int = 8
     worker_max_attempts: int = 3
     worker_max_concurrency: int = 4
@@ -152,7 +152,7 @@ class ControlPlaneConfig:
             backup_interval_seconds=int(env.get("STAFF_BACKUP_INTERVAL_SECONDS", "21600")),
             nemotron_readiness_timeout_seconds=int(env.get("NEMOTRON_READINESS_TIMEOUT_SECONDS", "10")),
             nemotron_readiness_ttl_seconds=int(env.get("NEMOTRON_READINESS_TTL_SECONDS", "120")),
-            nemotron_worker_max_tokens=int(env.get("NEMOTRON_WORKER_MAX_TOKENS", "600")),
+            nemotron_worker_max_tokens=int(env.get("NEMOTRON_WORKER_MAX_TOKENS", "1200")),
             nemotron_worker_memory_limit=int(env.get("NEMOTRON_WORKER_MEMORY_LIMIT", "8")),
             worker_max_attempts=int(env.get("STAFF_WORKER_MAX_ATTEMPTS", "3")),
             worker_max_concurrency=int(env.get("STAFF_WORKER_MAX_CONCURRENCY", "4")),

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import secrets
 import threading
+import time
 from dataclasses import asdict
 from datetime import date
 from decimal import Decimal, InvalidOperation
@@ -234,7 +235,14 @@ class ControlPlaneService:
 
     def _process_staff_instruction(self, staff_id: str, work_item_id: str) -> None:
         try:
-            self.runtime.worker.run_until_idle(staff_id, max_items=20)
+            while True:
+                self.runtime.worker.run_until_idle(staff_id, max_items=20)
+                retry_at = self.runtime.worker_queue.next_attempt_at(work_item_id)
+                if retry_at is None:
+                    return
+                delay_seconds = max(0.0, (retry_at - self.runtime.clock.now()).total_seconds())
+                if delay_seconds:
+                    time.sleep(delay_seconds)
         except Exception as exc:
             self.runtime.audit.append(
                 GovernanceAuditEvent(
