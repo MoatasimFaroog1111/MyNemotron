@@ -12,10 +12,31 @@ concurrency:
 
 jobs:
   live-gold-holdout:
-    name: Live Gold Holdout
+    name: Live Gold Holdout - ${{ matrix.staff_id }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     environment: staff-evaluation-live
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        staff_id:
+          - staff-advanced-analytics
+          - staff-ai-specialist
+          - staff-bank-reconciliation
+          - staff-content-manager
+          - staff-customer-support
+          - staff-cybersecurity
+          - staff-data-analyst
+          - staff-financial-accountant
+          - staff-financial-reporting
+          - staff-infrastructure-manager
+          - staff-integration-engineer
+          - staff-network-manager
+          - staff-operations-monitor
+          - staff-project-manager
+          - staff-systems-developer
+          - staff-ux-specialist
     env:
       NEMOTRON_BASE_URL: ${{ secrets.NEMOTRON_BASE_URL }}
       NEMOTRON_MODEL: ${{ secrets.NEMOTRON_MODEL }}
@@ -55,15 +76,21 @@ jobs:
 
       - name: Run isolated live Gold Holdout
         run: |
-          PYTHONPATH=src python -m nemotron.staff.evaluation.run --all --mode live --suite gold-v1 --format json > staff-evaluation-live.json
+          PYTHONPATH=src python -m nemotron.staff.evaluation.run \
+            --staff "${{ matrix.staff_id }}" \
+            --mode live \
+            --suite gold-v1 \
+            --format json \
+            --run-id "live-${{ github.run_id }}-${{ matrix.staff_id }}" \
+            > "staff-evaluation-live-${{ matrix.staff_id }}.json"
 
       - name: Upload live evaluation report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: staff-evaluation-live
+          name: staff-evaluation-live-${{ matrix.staff_id }}
           path: |
-            staff-evaluation-live.json
+            staff-evaluation-live-${{ matrix.staff_id }}.json
             evaluation-reports/
           if-no-files-found: ignore
           retention-days: 30
