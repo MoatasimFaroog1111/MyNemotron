@@ -9,6 +9,7 @@ import urllib.request
 
 import pytest
 
+from nemotron.staff.application.queue_staff_instruction import QueueStaffInstructionRequest
 from nemotron.staff.application.worker_ports import WorkerAnalysis, WorkerAnalysisStatus
 from nemotron.staff.control_plane.config import ControlPlaneConfig
 from nemotron.staff.control_plane.http_api import ControlPlaneHTTPServer
@@ -100,7 +101,7 @@ def _start_ui(tmp_path, reasoner=None):  # type: ignore[no-untyped-def]
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     host, port = server.server_address
-    return config, server, thread, f"http://{host}:{port}"
+    return config, runtime, server, thread, f"http://{host}:{port}"
 
 
 def _login(root: str, token: str) -> tuple[str, str]:
@@ -117,7 +118,7 @@ def _login(root: str, token: str) -> tuple[str, str]:
 
 
 def test_official_frontend_is_same_origin_and_api_token_is_not_embedded(tmp_path) -> None:
-    config, server, thread, root = _start_ui(tmp_path)
+    config, runtime, server, thread, root = _start_ui(tmp_path)
     try:
         with urllib.request.urlopen(root + "/ui/", timeout=5) as response:
             html = response.read().decode("utf-8")
@@ -154,7 +155,7 @@ def test_official_frontend_is_same_origin_and_api_token_is_not_embedded(tmp_path
 
 
 def test_ui_login_issues_http_only_session_and_projects_real_staff(tmp_path) -> None:
-    config, server, thread, root = _start_ui(tmp_path)
+    config, runtime, server, thread, root = _start_ui(tmp_path)
     try:
         with pytest.raises(urllib.error.HTTPError) as exc_info:
             _login(root, "wrong-token")
@@ -201,7 +202,7 @@ def test_ui_login_issues_http_only_session_and_projects_real_staff(tmp_path) -> 
 
 
 def test_ui_session_accepts_instruction_immediately_and_worker_finishes_asynchronously(tmp_path) -> None:
-    config, server, thread, root = _start_ui(tmp_path)
+    config, runtime, server, thread, root = _start_ui(tmp_path)
     try:
         cookie, _ = _login(root, config.api_token)
         body = json.dumps({"instruction": "راجع بيانات GitHub وحدد ما يحتاج متابعة."}, ensure_ascii=False).encode("utf-8")
@@ -245,9 +246,57 @@ def test_ui_session_accepts_instruction_immediately_and_worker_finishes_asynchro
         thread.join(timeout=2)
 
 
+
+def test_ui_instruction_processes_its_exact_work_item_without_draining_backlog(tmp_path) -> None:
+    config, runtime, server, thread, root = _start_ui(tmp_path)
+    try:
+        old = runtime.queue_staff_instruction(
+            QueueStaffInstructionRequest(
+                staff_id="staff-ui-1",
+                instruction="تعليمة قديمة يجب أن تبقى في الخلفية.",
+                actor_id="ui-operator",
+            )
+        )
+        cookie, _ = _login(root, config.api_token)
+        body = json.dumps({"instruction": "نفذ هذه التعليمة الجديدة فوراً."}, ensure_ascii=False).encode("utf-8")
+        request = urllib.request.Request(
+            root + "/ui/api/staff/staff-ui-1/instructions",
+            data=body,
+            headers={"Cookie": cookie, "Content-Type": "application/json", "Accept": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            assert response.status == 202
+            result = json.load(response)
+
+        workspace = None
+        target = None
+        for _ in range(80):
+            request = urllib.request.Request(root + "/ui/api/staff/staff-ui-1/workspace", headers={"Cookie": cookie})
+            with urllib.request.urlopen(request, timeout=5) as response:
+                workspace = json.load(response)
+            target = next(
+                (item for item in workspace["tasks"] if item["task_id"] == result["execution"]["task_id"]),
+                None,
+            )
+            if target and target.get("decision"):
+                break
+            time.sleep(0.05)
+
+        assert target is not None
+        assert target["decision"]["rationale"] == "تم تحليل التعليمات التجريبية بنجاح."
+        assert any(
+            item["work_item_id"] == old.work_item_id and item["status"] == "queued"
+            for item in workspace["queued_work"]
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
 def test_ui_background_worker_resumes_scheduled_retry_until_decision(tmp_path) -> None:
     reasoner = _RetryOnceUIReasoner()
-    config, server, thread, root = _start_ui(tmp_path, reasoner=reasoner)
+    config, runtime, server, thread, root = _start_ui(tmp_path, reasoner=reasoner)
     try:
         cookie, _ = _login(root, config.api_token)
         body = json.dumps({"instruction": "حلل هذه التعليمات بعد تعافٍ مؤقت."}, ensure_ascii=False).encode("utf-8")
@@ -290,7 +339,7 @@ def test_ui_background_worker_resumes_scheduled_retry_until_decision(tmp_path) -
 
 
 def test_ui_browser_session_cannot_call_write_control_plane_routes(tmp_path) -> None:
-    config, server, thread, root = _start_ui(tmp_path)
+    config, runtime, server, thread, root = _start_ui(tmp_path)
     try:
         cookie, _ = _login(root, config.api_token)
         request = urllib.request.Request(
