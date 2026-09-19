@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from nemotron.staff.adapters.nemotron_worker import NemotronWorkerReasoningAdapter
 from nemotron.staff.adapters.sqlite_core import SQLiteTaskRepository
@@ -210,6 +210,40 @@ def _build_runtime(tmp_path, *, risk: RiskLevel, source_reference: str | None, r
     )
     return engine, queue, tasks, audit
 
+
+
+def test_run_work_item_processes_target_without_touching_older_backlog(tmp_path) -> None:
+    reasoner = ReadyReasoner()
+    engine, queue, _, _ = _build_runtime(
+        tmp_path,
+        risk=RiskLevel.LOW,
+        source_reference="crm:customer-42",
+        reasoner=reasoner,
+    )
+    older = WorkItem(
+        "work-old",
+        "org-1",
+        "goal-old",
+        "plan-old",
+        "s1",
+        "Older backlog",
+        "read",
+        "crm",
+        RiskLevel.LOW,
+        "worker",
+        NOW - timedelta(seconds=1),
+    )
+    queue.store.enqueue(older)
+
+    result = engine.run_work_item("worker", "work-1")
+
+    assert result.status is WorkerRunStatus.HANDOFF_READY
+    assert result.work_item_id == "work-1"
+    assert reasoner.calls == 1
+
+    remaining = queue.claim_next("worker", at=NOW)
+    assert remaining is not None
+    assert remaining.work_item_id == "work-old"
 
 def test_low_risk_worker_hands_decision_to_staff_core_without_execution(tmp_path) -> None:
     reasoner = ReadyReasoner()

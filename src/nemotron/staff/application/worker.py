@@ -173,7 +173,24 @@ class StaffWorkerEngine:
         item = self._queue.claim_next(staff_id, at=self._clock.now())
         if item is None:
             return WorkerRunResult(WorkerRunStatus.IDLE, staff_id, detail="No eligible work.")
+        return self._run_claimed_item(staff_id, item)
 
+    def run_work_item(self, staff_id: str, work_item_id: str) -> WorkerRunResult:
+        member = self._staff.get(staff_id)
+        member.assert_active()
+        item = self._queue.claim_work_item(work_item_id, staff_id=staff_id, at=self._clock.now())
+        if item is None:
+            return WorkerRunResult(
+                WorkerRunStatus.IDLE,
+                staff_id,
+                work_item_id=work_item_id,
+                task_id=f"work-task:{work_item_id}",
+                detail="Target work item is not currently eligible.",
+            )
+        return self._run_claimed_item(staff_id, item)
+
+    def _run_claimed_item(self, staff_id: str, item: WorkItem) -> WorkerRunResult:
+        member = self._staff.get(staff_id)
         try:
             member.assert_allowed(item.action, item.resource, item.risk)
             self._audit.append(

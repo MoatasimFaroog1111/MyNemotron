@@ -334,6 +334,7 @@ def build_production_runtime(
             base_url=config.nemotron_base_url,
             model=worker_model_id,
             api_key=config.nemotron_api_key,
+            timeout_seconds=config.nemotron_worker_timeout_seconds,
             max_tokens=config.nemotron_worker_max_tokens,
             max_visible_memory=config.nemotron_worker_memory_limit,
         )

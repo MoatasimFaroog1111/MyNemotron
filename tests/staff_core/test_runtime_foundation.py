@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from nemotron.staff.adapters.nemotron_planner import NemotronPlanningAdapter
+from nemotron.staff.adapters.sqlite_worker import SQLiteWorkerQueue
 from nemotron.staff.adapters.sqlite_runtime import (
     SQLiteGoalRepository,
     SQLiteMemoryRepository,
@@ -142,6 +143,50 @@ def test_work_queue_claim_is_single_and_completion_is_versioned(tmp_path) -> Non
     assert completed.status is WorkStatus.COMPLETED
     assert completed.version == 3
 
+
+
+def test_worker_queue_claims_specific_item_without_draining_older_backlog(tmp_path) -> None:
+    store = SQLiteRuntimeStore(tmp_path / "targeted-worker.db")
+    queue = SQLiteWorkerQueue(store)
+    older = WorkItem(
+        "work-old",
+        "org-1",
+        "goal-old",
+        "plan-old",
+        "s1",
+        "Older backlog",
+        "read",
+        "crm",
+        RiskLevel.LOW,
+        "worker",
+        NOW,
+    )
+    newer = WorkItem(
+        "work-new",
+        "org-1",
+        "goal-new",
+        "plan-new",
+        "s1",
+        "Fresh UI instruction",
+        "read",
+        "crm",
+        RiskLevel.LOW,
+        "worker",
+        NOW + timedelta(seconds=1),
+    )
+    store.enqueue(older)
+    store.enqueue(newer)
+
+    claimed = queue.claim_work_item("work-new", staff_id="worker", at=NOW + timedelta(seconds=2))
+
+    assert claimed is not None
+    assert claimed.work_item_id == "work-new"
+    assert claimed.status is WorkStatus.CLAIMED
+    assert queue.attempts("work-new") == 1
+
+    remaining = queue.claim_next("worker", at=NOW + timedelta(seconds=2))
+    assert remaining is not None
+    assert remaining.work_item_id == "work-old"
 
 def test_dependencies_block_claim_until_prior_step_completes(tmp_path) -> None:
     store = SQLiteRuntimeStore(tmp_path / "runtime.db")

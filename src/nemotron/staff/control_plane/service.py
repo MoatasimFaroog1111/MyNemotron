@@ -10,6 +10,8 @@ from typing import Any, Mapping
 
 from nemotron.staff.application.ports import GovernanceAuditEvent
 from nemotron.staff.application.queue_staff_instruction import QueueStaffInstructionRequest
+from nemotron.staff.application.worker import WorkerRunStatus
+from nemotron.staff.domain.runtime import WorkStatus
 from nemotron.staff.application.tool_gateway import PrepareToolExecutionRequest
 from nemotron.staff.domain import PermissionDenied
 from nemotron.staff.domain.runtime import RuntimeError as StaffRuntimeError
@@ -236,13 +238,21 @@ class ControlPlaneService:
     def _process_staff_instruction(self, staff_id: str, work_item_id: str) -> None:
         try:
             while True:
-                self.runtime.worker.run_until_idle(staff_id, max_items=20)
-                retry_at = self.runtime.worker_queue.next_attempt_at(work_item_id)
-                if retry_at is None:
+                result = self.runtime.worker.run_work_item(staff_id, work_item_id)
+                if result.status in {WorkerRunStatus.HANDOFF_READY, WorkerRunStatus.BLOCKED}:
                     return
-                delay_seconds = max(0.0, (retry_at - self.runtime.clock.now()).total_seconds())
-                if delay_seconds:
-                    time.sleep(delay_seconds)
+
+                retry_at = self.runtime.worker_queue.next_attempt_at(work_item_id)
+                if retry_at is not None:
+                    delay_seconds = max(0.0, (retry_at - self.runtime.clock.now()).total_seconds())
+                    if delay_seconds:
+                        time.sleep(delay_seconds)
+                    continue
+
+                status = self.runtime.worker_queue.status(work_item_id)
+                if status not in {WorkStatus.QUEUED, WorkStatus.CLAIMED}:
+                    return
+                time.sleep(0.25)
         except Exception as exc:
             self.runtime.audit.append(
                 GovernanceAuditEvent(

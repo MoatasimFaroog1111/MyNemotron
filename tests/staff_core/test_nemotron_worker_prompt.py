@@ -178,6 +178,7 @@ def test_worker_prompt_requires_direct_same_language_answer(monkeypatch, caplog)
     assert body["chat_template_kwargs"] == {"enable_thinking": False}
     assert "actual user-facing answer" in system
     assert "same language as authorized_request" in system
+    assert "decision_rationale under 1200 characters" in system.lower()
     assert "operational identity is the staff role_name" in system.lower()
     assert "do not identify yourself as nemotron" in system.lower()
     assert "underlying model" in system.lower()
@@ -219,5 +220,7 @@ def test_worker_detects_token_limit_truncation_before_json_parsing(monkeypatch) 
         adapter.analyze(_context())
 
 
-def test_default_worker_output_budget_allows_structured_user_answers() -> None:
-    assert NemotronWorkerConfig("https://model.test", "nemotron").max_tokens >= 1200
+def test_default_worker_budget_is_bounded_for_interactive_staff_responses() -> None:
+    config = NemotronWorkerConfig("https://model.test", "nemotron")
+    assert config.max_tokens == 512
+    assert config.timeout_seconds == 45

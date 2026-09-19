@@ -54,8 +54,8 @@ class NemotronWorkerConfig:
     base_url: str
     model: str
     api_key: str | None = None
-    timeout_seconds: int = 90
-    max_tokens: int = 1200
+    timeout_seconds: int = 45
+    max_tokens: int = 512
     max_visible_memory: int = 8
 
     def __post_init__(self) -> None:
@@ -108,6 +108,7 @@ class NemotronWorkerReasoningAdapter:
                         "Write decision_rationale as the actual user-facing answer, not a description of the evidence or your process. "
                         "Answer in the same language as authorized_request unless the request explicitly asks for another language. "
                         "Keep the answer concise but complete. Do not repeat the request or internal metadata. "
+                        "Keep decision_rationale under 1200 characters unless the request explicitly requires a shorter limit. "
                         "Do not say things like 'the visible memory contains', 'the work item matches', or discuss internal governance "
                         "unless that is directly relevant to the user's request. "
                         "If the request can be answered from general reasoning without external facts, answer it directly and select "

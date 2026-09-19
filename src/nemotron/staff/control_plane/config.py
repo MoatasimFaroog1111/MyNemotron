@@ -49,7 +49,8 @@ class ControlPlaneConfig:
     backup_interval_seconds: int = 21600
     nemotron_readiness_timeout_seconds: int = 10
     nemotron_readiness_ttl_seconds: int = 120
-    nemotron_worker_max_tokens: int = 1200
+    nemotron_worker_timeout_seconds: int = 45
+    nemotron_worker_max_tokens: int = 512
     nemotron_worker_memory_limit: int = 8
     worker_max_attempts: int = 3
     worker_max_concurrency: int = 4
@@ -85,6 +86,8 @@ class ControlPlaneConfig:
             raise ValueError("NEMOTRON_READINESS_TIMEOUT_SECONDS must be positive.")
         if self.nemotron_readiness_ttl_seconds < 1:
             raise ValueError("NEMOTRON_READINESS_TTL_SECONDS must be positive.")
+        if self.nemotron_worker_timeout_seconds < 1:
+            raise ValueError("NEMOTRON_WORKER_TIMEOUT_SECONDS must be positive.")
         if self.nemotron_worker_max_tokens < 64:
             raise ValueError("NEMOTRON_WORKER_MAX_TOKENS must be at least 64.")
         if self.nemotron_worker_memory_limit < 1:
@@ -152,7 +155,8 @@ class ControlPlaneConfig:
             backup_interval_seconds=int(env.get("STAFF_BACKUP_INTERVAL_SECONDS", "21600")),
             nemotron_readiness_timeout_seconds=int(env.get("NEMOTRON_READINESS_TIMEOUT_SECONDS", "10")),
             nemotron_readiness_ttl_seconds=int(env.get("NEMOTRON_READINESS_TTL_SECONDS", "120")),
-            nemotron_worker_max_tokens=int(env.get("NEMOTRON_WORKER_MAX_TOKENS", "1200")),
+            nemotron_worker_timeout_seconds=int(env.get("NEMOTRON_WORKER_TIMEOUT_SECONDS", "45")),
+            nemotron_worker_max_tokens=int(env.get("NEMOTRON_WORKER_MAX_TOKENS", "512")),
             nemotron_worker_memory_limit=int(env.get("NEMOTRON_WORKER_MEMORY_LIMIT", "8")),
             worker_max_attempts=int(env.get("STAFF_WORKER_MAX_ATTEMPTS", "3")),
             worker_max_concurrency=int(env.get("STAFF_WORKER_MAX_CONCURRENCY", "4")),
@@ -184,6 +188,7 @@ class ControlPlaneConfig:
             "nemotron_model": self.nemotron_model,
             "nemotron_api_key_configured": bool(self.nemotron_api_key),
             "nemotron_worker": {
+                "timeout_seconds": self.nemotron_worker_timeout_seconds,
                 "max_tokens": self.nemotron_worker_max_tokens,
                 "memory_limit": self.nemotron_worker_memory_limit,
             },
