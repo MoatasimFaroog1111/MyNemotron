@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
+
+import pytest
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 from nemotron.staff.adapters.nemotron_worker import NemotronWorkerConfig, NemotronWorkerReasoningAdapter
 from nemotron.staff.application.worker_ports import WorkerContext
 from nemotron.staff.domain import RiskLevel, Task
-from nemotron.staff.domain.runtime import Goal, MemoryEntry, MemoryScope, WorkItem
+from nemotron.staff.domain.runtime import Goal, MemoryEntry, MemoryScope, RuntimeError as StaffRuntimeError, WorkItem
 from nemotron.staff.domain.skills import SkillDefinition, SkillVersion, TrainingStatus
 
 
@@ -180,3 +182,38 @@ def test_worker_prompt_requires_direct_same_language_answer(monkeypatch, caplog)
     assert "never grant authority" in system.lower()
     assert result.decision_rationale.startswith("١.")
     assert any("latency_ms=" in record.message and "prompt_tokens=220" in record.message for record in caplog.records)
+
+
+def test_worker_detects_token_limit_truncation_before_json_parsing(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    class FakeResponse:
+        def __enter__(self):  # type: ignore[no-untyped-def]
+            return self
+
+        def __exit__(self, exc_type, exc, tb):  # type: ignore[no-untyped-def]
+            return False
+
+        def read(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+            return json.dumps(
+                {
+                    "choices": [
+                        {
+                            "finish_reason": "length",
+                            "message": {"content": "{\"status\":\"ready\""}
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 220, "completion_tokens": 600, "total_tokens": 820},
+                }
+            ).encode("utf-8")
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda request, timeout: FakeResponse())
+
+    adapter = NemotronWorkerReasoningAdapter(
+        NemotronWorkerConfig("https://model.test", "nemotron", max_tokens=600)
+    )
+
+    with pytest.raises(StaffRuntimeError, match="truncated"):
+        adapter.analyze(_context())
+
+
+def test_default_worker_output_budget_allows_structured_user_answers() -> None:
+    assert NemotronWorkerConfig("https://model.test", "nemotron").max_tokens >= 1200
