@@ -6,7 +6,7 @@ from enum import Enum
 from typing import Protocol
 
 from nemotron.staff.domain.model import Task
-from nemotron.staff.domain.runtime import Goal, MemoryEntry, WorkItem
+from nemotron.staff.domain.runtime import Goal, MemoryEntry, WorkItem, WorkStatus
 from nemotron.staff.domain.skills import SkillVersion
 
 
@@ -133,3 +133,6 @@ class WorkerQueuePort(Protocol):
 
     def attempts(self, work_item_id: str) -> int:
         """Return how many times the worker runtime has claimed this item."""
+
+    def status(self, work_item_id: str) -> WorkStatus | None:
+        """Return the persisted work-item status, or None when the item does not exist."""
