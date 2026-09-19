@@ -69,8 +69,10 @@ def _config(tmp_path) -> ControlPlaneConfig:  # type: ignore[no-untyped-def]
     )
 
 
-def test_default_control_plane_worker_output_budget_is_not_the_600_token_truncation_limit(tmp_path) -> None:
-    assert _config(tmp_path).nemotron_worker_max_tokens >= 1200
+def test_default_control_plane_worker_budget_is_bounded_for_interactive_responses(tmp_path) -> None:
+    config = _config(tmp_path)
+    assert config.nemotron_worker_max_tokens == 512
+    assert config.nemotron_worker_timeout_seconds == 45
 
 
 def _start_ui(tmp_path, reasoner=None):  # type: ignore[no-untyped-def]
