@@ -216,6 +216,81 @@ class SQLiteWorkerQueue:
         finally:
             db.close()
 
+    def claim_work_item(self, work_item_id: str, *, staff_id: str, at: datetime) -> WorkItem | None:
+        db = self._connect()
+        try:
+            db.execute("BEGIN IMMEDIATE")
+            self._recover_expired_leases(db, at=at)
+            if self._active_lease_count(db, at=at) >= self.limits.max_concurrency:
+                db.execute("COMMIT")
+                return None
+
+            row = db.execute(
+                """SELECT q.*, a.next_attempt_at
+                FROM runtime_work_queue AS q
+                LEFT JOIN runtime_worker_attempts AS a ON a.work_item_id = q.work_item_id
+                WHERE q.work_item_id = ? AND q.assigned_staff_id = ? AND q.status = ?""",
+                (work_item_id, staff_id, WorkStatus.QUEUED.value),
+            ).fetchone()
+            if row is None:
+                db.execute("COMMIT")
+                return None
+            if row["next_attempt_at"] is not None and datetime.fromisoformat(row["next_attempt_at"]) > at:
+                db.execute("COMMIT")
+                return None
+
+            dependencies = tuple(json.loads(row["depends_on_json"]))
+            if dependencies:
+                placeholders = ",".join("?" for _ in dependencies)
+                unresolved = db.execute(
+                    f"SELECT COUNT(*) AS n FROM runtime_work_queue "
+                    f"WHERE proposal_id = ? AND step_id IN ({placeholders}) AND status != ?",
+                    (row["proposal_id"], *dependencies, WorkStatus.COMPLETED.value),
+                ).fetchone()["n"]
+                if unresolved:
+                    db.execute("COMMIT")
+                    return None
+
+            result = db.execute(
+                """UPDATE runtime_work_queue
+                SET status = ?, claimed_at = ?, version = version + 1
+                WHERE work_item_id = ? AND assigned_staff_id = ? AND status = ? AND version = ?""",
+                (
+                    WorkStatus.CLAIMED.value,
+                    at.isoformat(),
+                    work_item_id,
+                    staff_id,
+                    WorkStatus.QUEUED.value,
+                    row["version"],
+                ),
+            )
+            if result.rowcount != 1:
+                raise StaffRuntimeError("Targeted worker claim lost an optimistic-concurrency race.")
+
+            lease_expires_at = at + timedelta(seconds=self.limits.lease_seconds)
+            db.execute(
+                """INSERT INTO runtime_worker_attempts(
+                    work_item_id, attempts, last_error, lease_expires_at, next_attempt_at
+                ) VALUES (?, 1, NULL, ?, NULL)
+                ON CONFLICT(work_item_id) DO UPDATE SET
+                    attempts = runtime_worker_attempts.attempts + 1,
+                    last_error = NULL,
+                    lease_expires_at = excluded.lease_expires_at,
+                    next_attempt_at = NULL""",
+                (work_item_id, lease_expires_at.isoformat()),
+            )
+            claimed = db.execute(
+                "SELECT * FROM runtime_work_queue WHERE work_item_id = ?",
+                (work_item_id,),
+            ).fetchone()
+            db.execute("COMMIT")
+            return SQLiteRuntimeStore._work_from_row(claimed)
+        except Exception:
+            db.execute("ROLLBACK")
+            raise
+        finally:
+            db.close()
+
     def heartbeat(self, work_item_id: str, *, staff_id: str, at: datetime) -> None:
         lease_expires_at = at + timedelta(seconds=self.limits.lease_seconds)
         with self._connect() as db:
