@@ -236,7 +236,7 @@ class ControlPlaneService:
     def _process_staff_instruction(self, staff_id: str, work_item_id: str) -> None:
         try:
             while True:
-                self.runtime.worker.run_until_idle(staff_id, max_items=20)
+                self.runtime.worker.run_work_item(staff_id, work_item_id)
                 retry_at = self.runtime.worker_queue.next_attempt_at(work_item_id)
                 if retry_at is None:
                     return
