@@ -15,6 +15,7 @@ from nemotron.staff.control_plane.http_api import ControlPlaneHTTPServer
 from nemotron.staff.control_plane.runtime import build_production_runtime
 from nemotron.staff.control_plane.service import ControlPlaneService
 from nemotron.staff.domain import Permission, RiskLevel, Role, StaffMember
+from nemotron.staff.domain.runtime import RuntimeError as StaffRuntimeError
 from nemotron.staff.domain.organization import Department, Organization, StaffPlacement
 
 
@@ -34,6 +35,24 @@ class _UIReasoner:
         )
 
 
+class _RetryOnceUIReasoner:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def analyze(self, context):  # type: ignore[no-untyped-def]
+        self.calls += 1
+        if self.calls == 1:
+            raise StaffRuntimeError("simulated transient model failure")
+        assert context.visible_memory
+        evidence = context.visible_memory[-1]
+        return WorkerAnalysis(
+            status=WorkerAnalysisStatus.READY,
+            work_summary="UI instruction recovered after retry.",
+            evidence_memory_ids=(evidence.memory_id,),
+            decision_rationale="اكتملت إعادة المحاولة بنجاح.",
+        )
+
+
 def _config(tmp_path) -> ControlPlaneConfig:  # type: ignore[no-untyped-def]
     return ControlPlaneConfig(
         data_dir=tmp_path / "data",
@@ -44,12 +63,14 @@ def _config(tmp_path) -> ControlPlaneConfig:  # type: ignore[no-untyped-def]
         capability_secret=b"u" * 32,
         nemotron_base_url="https://model.example.test",
         nemotron_model="nemotron-ui-test",
+        worker_retry_initial_seconds=0,
+        worker_retry_max_seconds=0,
     )
 
 
-def _start_ui(tmp_path):  # type: ignore[no-untyped-def]
+def _start_ui(tmp_path, reasoner=None):  # type: ignore[no-untyped-def]
     config = _config(tmp_path)
-    runtime = build_production_runtime(config, reasoner=_UIReasoner())
+    runtime = build_production_runtime(config, reasoner=reasoner or _UIReasoner())
     member = StaffMember(
         "staff-ui-1",
         "موظف الاختبار",
@@ -214,6 +235,50 @@ def test_ui_session_accepts_instruction_immediately_and_worker_finishes_asynchro
         task = next(item for item in workspace["tasks"] if item["task_id"] == result["execution"]["task_id"])
         assert task["decision"]["rationale"] == "تم تحليل التعليمات التجريبية بنجاح."
         assert all(item["status"] == "claimed" for item in workspace["queued_work"])
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_ui_background_worker_resumes_scheduled_retry_until_decision(tmp_path) -> None:
+    reasoner = _RetryOnceUIReasoner()
+    config, server, thread, root = _start_ui(tmp_path, reasoner=reasoner)
+    try:
+        cookie, _ = _login(root, config.api_token)
+        body = json.dumps({"instruction": "حلل هذه التعليمات بعد تعافٍ مؤقت."}, ensure_ascii=False).encode("utf-8")
+        request = urllib.request.Request(
+            root + "/ui/api/staff/staff-ui-1/instructions",
+            data=body,
+            headers={"Cookie": cookie, "Content-Type": "application/json", "Accept": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            assert response.status == 202
+            result = json.load(response)
+
+        workspace = None
+        task = None
+        for _ in range(80):
+            request = urllib.request.Request(root + "/ui/api/staff/staff-ui-1/workspace", headers={"Cookie": cookie})
+            with urllib.request.urlopen(request, timeout=5) as response:
+                workspace = json.load(response)
+            task = next(
+                (item for item in workspace["tasks"] if item["task_id"] == result["execution"]["task_id"]),
+                None,
+            )
+            if task and task.get("decision"):
+                break
+            time.sleep(0.05)
+
+        assert reasoner.calls == 2
+        assert task is not None
+        assert task["decision"]["rationale"] == "اكتملت إعادة المحاولة بنجاح."
+        assert any(
+            item["event_type"] == "worker.retry_scheduled"
+            and item["subject_id"] == result["work_item_id"]
+            for item in workspace["audit"]
+        )
     finally:
         server.shutdown()
         server.server_close()
