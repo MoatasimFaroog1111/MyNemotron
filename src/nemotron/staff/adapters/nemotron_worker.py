@@ -83,6 +83,7 @@ class NemotronWorkerReasoningAdapter:
             "stream": False,
             "max_tokens": self._config.max_tokens,
             "response_format": {"type": "json_object"},
+            "chat_template_kwargs": {"enable_thinking": False},
             "messages": [
                 {
                     "role": "system",
