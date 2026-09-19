@@ -82,6 +82,9 @@ class WorkerQueuePort(Protocol):
     def claim_next(self, staff_id: str, *, at: datetime) -> WorkItem | None:
         """Atomically claim the next eligible work item, recovering expired leases."""
 
+    def claim_work_item(self, work_item_id: str, *, staff_id: str, at: datetime) -> WorkItem | None:
+        """Atomically claim one specific eligible work item without draining unrelated backlog."""
+
     def heartbeat(self, work_item_id: str, *, staff_id: str, at: datetime) -> None:
         """Extend a live worker lease without changing the work-item version."""
 
