@@ -68,6 +68,10 @@ def _config(tmp_path) -> ControlPlaneConfig:  # type: ignore[no-untyped-def]
     )
 
 
+def test_default_control_plane_worker_output_budget_is_not_the_600_token_truncation_limit(tmp_path) -> None:
+    assert _config(tmp_path).nemotron_worker_max_tokens >= 1200
+
+
 def _start_ui(tmp_path, reasoner=None):  # type: ignore[no-untyped-def]
     config = _config(tmp_path)
     runtime = build_production_runtime(config, reasoner=reasoner or _UIReasoner())
