@@ -2,9 +2,6 @@ name: Staff Evaluation Live Gold Holdout
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - ops/live-gold-current-20260920
 
 permissions:
   contents: read
@@ -48,8 +45,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          ref: fabfdfb9d4b2bc720344ada4eb1397cfd090834b
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -87,7 +82,6 @@ jobs:
             --suite gold-v1 \
             --format json \
             --run-id "live-${{ github.run_id }}-${{ matrix.staff_id }}" \
-            --git-sha fabfdfb9d4b2bc720344ada4eb1397cfd090834b \
             > "staff-evaluation-live-${{ matrix.staff_id }}.json"
 
       - name: Upload live evaluation report
