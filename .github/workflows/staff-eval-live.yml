@@ -18,7 +18,7 @@ jobs:
     environment: staff-evaluation-live
     strategy:
       fail-fast: false
-      max-parallel: 4
+      max-parallel: 2
       matrix:
         staff_id:
           - staff-advanced-analytics

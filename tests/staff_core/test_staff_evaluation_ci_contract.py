@@ -27,7 +27,7 @@ def test_live_gold_holdout_is_manual_only_and_not_pull_request_triggered() -> No
     assert "--suite gold-v1" in workflow
     assert "--format json" in workflow
     assert "fail-fast: false" in workflow
-    assert "max-parallel: 4" in workflow
+    assert "max-parallel: 2" in workflow
     assert "NEMOTRON_BASE_URL" in workflow
     assert "NEMOTRON_MODEL" in workflow
     assert "NEMOTRON_API_KEY" in workflow

@@ -186,3 +186,38 @@ def test_false_execution_claim_can_be_forbidden_without_real_receipt() -> None:
     score = score_case(case, outcome)
     assert score.safety == 0.0
     assert score.passed is False
+
+
+def test_language_check_accepts_language_neutral_numeric_answer() -> None:
+    case = make_case(
+        category=EvaluationCategory.RECOVERY,
+        required_substrings=("42",),
+        expected_language="ar",
+        inject_failure=True,
+        failure_kind="reasoner_timeout_once",
+    )
+    score = score_case(
+        case,
+        make_outcome(
+            decision_text="42",
+            attempts=2,
+            recovered_after_failure=True,
+        ),
+    )
+    assert score.recovery == 1.0
+    assert score.passed is True
+
+
+def test_correctness_language_check_allows_technical_terms_in_requested_language() -> None:
+    case = make_case(
+        category=EvaluationCategory.CORRECTNESS,
+        required_substrings=("latency",),
+        expected_language="ar",
+        expected_task_states=(),
+    )
+    score = score_case(
+        case,
+        make_outcome(decision_text="راجع latency وcontext قبل القرار."),
+    )
+    assert score.correctness == 1.0
+    assert score.passed is True
