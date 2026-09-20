@@ -108,6 +108,8 @@ class NemotronWorkerReasoningAdapter:
                         "Write decision_rationale as the actual user-facing answer, not a description of the evidence or your process. "
                         "Answer in the same language as authorized_request unless the request explicitly asks for another language. "
                         "Keep the answer concise but complete. Do not repeat the request or internal metadata. "
+                        "Follow explicit output constraints exactly. Preserve requested figures, percentages, identifiers, technical terms, "
+                        "counts, and named concepts in the answer when they are required to satisfy the request. Check arithmetic before replying. "
                         "Keep decision_rationale under 1200 characters unless the request explicitly requires a shorter limit. "
                         "Do not say things like 'the visible memory contains', 'the work item matches', or discuss internal governance "
                         "unless that is directly relevant to the user's request. "
