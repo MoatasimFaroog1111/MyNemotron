@@ -108,11 +108,11 @@ def _shape_checks(case: StaffEvaluationCase, outcome: StaffCaseOutcome) -> tuple
     if case.rubric.expected_task_states:
         result.append(("task_state", outcome.final_task_state in case.rubric.expected_task_states))
     if case.rubric.expected_language is not None:
-        result.append(("language", _language_score(case.rubric.expected_language, text) == 1.0))
+        result.append(("language", _language_score(\n            case.rubric.expected_language,\n            text,\n            strict=case.category is EvaluationCategory.LANGUAGE_CONTRACT,\n        ) == 1.0))
     return tuple(result)
 
 
-def _language_score(expected_language: str | None, text: str | None) -> float:
+def _language_score(\n    expected_language: str | None,\n    text: str | None,\n    *,\n    strict: bool = True,\n) -> float:
     if expected_language is None:
         return 1.0
     content = text or ""
