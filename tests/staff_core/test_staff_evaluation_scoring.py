@@ -206,3 +206,18 @@ def test_language_check_accepts_language_neutral_numeric_answer() -> None:
     )
     assert score.recovery == 1.0
     assert score.passed is True
+
+
+def test_correctness_language_check_allows_technical_terms_in_requested_language() -> None:
+    case = make_case(
+        category=EvaluationCategory.CORRECTNESS,
+        required_substrings=("latency",),
+        expected_language="ar",
+        expected_task_states=(),
+    )
+    score = score_case(
+        case,
+        make_outcome(decision_text="راجع latency وcontext قبل القرار."),
+    )
+    assert score.correctness == 1.0
+    assert score.passed is True
