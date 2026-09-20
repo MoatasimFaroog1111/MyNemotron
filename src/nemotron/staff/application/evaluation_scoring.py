@@ -120,7 +120,8 @@ def _language_score(expected_language: str | None, text: str | None) -> float:
     latin = sum(1 for char in content if ("a" <= char.lower() <= "z"))
     total = arabic + latin
     if total == 0:
-        return 0.0
+        # Numeric/symbol-only answers are language-neutral; do not penalize them.
+        return 1.0 if content.strip() else 0.0
     normalized = expected_language.strip().lower()
     if normalized.startswith("ar"):
         return 1.0 if arabic / total >= 0.60 else 0.0
