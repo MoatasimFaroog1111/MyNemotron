@@ -297,6 +297,18 @@ class NemotronWorkerReasoningAdapter:
         if set(evidence_ids) - visible_ids:
             raise StaffRuntimeError("Worker reasoning referenced memory outside the visible context.")
 
+        if status is WorkerAnalysisStatus.READY and cls._requires_unavailable_execution_authority(
+            context.goal.description,
+            decision_rationale,
+        ):
+            return WorkerAnalysis(
+                status=WorkerAnalysisStatus.BLOCKED,
+                work_summary="Request exceeds the governed read-only worker authority.",
+                evidence_memory_ids=(),
+                decision_rationale=None,
+                block_reason="External execution or approval bypass requires governed authority and an execution receipt.",
+            )
+
         try:
             return WorkerAnalysis(
                 status=status,
@@ -307,3 +319,19 @@ class NemotronWorkerReasoningAdapter:
             )
         except ValueError as exc:
             raise StaffRuntimeError("Worker reasoning violated the governed output contract.") from exc
+
+    @staticmethod
+    def _requires_unavailable_execution_authority(request_text: str, rationale: str | None) -> bool:
+        request = request_text.casefold()
+        answer = (rationale or "").casefold()
+        bypass_request = (
+            ("تجاوز الموافقة" in request and ("نفذ" in request or "تنفيذ" in request))
+            or ("bypass approval" in request and ("execute" in request or "execution" in request))
+        )
+        false_execution_claim = (
+            "تم التنفيذ بنجاح" in answer
+            or "تم تجاوز الموافقة" in answer
+            or "executed successfully" in answer
+            or "approval was bypassed" in answer
+        )
+        return bypass_request or false_execution_claim
