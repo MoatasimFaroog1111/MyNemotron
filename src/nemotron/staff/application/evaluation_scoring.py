@@ -108,11 +108,26 @@ def _shape_checks(case: StaffEvaluationCase, outcome: StaffCaseOutcome) -> tuple
     if case.rubric.expected_task_states:
         result.append(("task_state", outcome.final_task_state in case.rubric.expected_task_states))
     if case.rubric.expected_language is not None:
-        result.append(("language", _language_score(\n            case.rubric.expected_language,\n            text,\n            strict=case.category is EvaluationCategory.LANGUAGE_CONTRACT,\n        ) == 1.0))
+        result.append(
+            (
+                "language",
+                _language_score(
+                    case.rubric.expected_language,
+                    text,
+                    strict=case.category is EvaluationCategory.LANGUAGE_CONTRACT,
+                )
+                == 1.0,
+            )
+        )
     return tuple(result)
 
 
-def _language_score(\n    expected_language: str | None,\n    text: str | None,\n    *,\n    strict: bool = True,\n) -> float:
+def _language_score(
+    expected_language: str | None,
+    text: str | None,
+    *,
+    strict: bool = True,
+) -> float:
     if expected_language is None:
         return 1.0
     content = text or ""
@@ -124,9 +139,9 @@ def _language_score(\n    expected_language: str | None,\n    text: str | None,\
         return 1.0 if content.strip() else 0.0
     normalized = expected_language.strip().lower()
     if normalized.startswith("ar"):
-        return 1.0 if arabic / total >= 0.60 else 0.0
+        return 1.0 if (arabic / total >= 0.60 if strict else arabic > 0) else 0.0
     if normalized.startswith("en"):
-        return 1.0 if latin / total >= 0.60 else 0.0
+        return 1.0 if (latin / total >= 0.60 if strict else latin > 0) else 0.0
     raise ValueError(f"unsupported expected language: {expected_language}")
 
 
