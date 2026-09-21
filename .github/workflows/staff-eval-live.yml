@@ -41,10 +41,11 @@ jobs:
       NEMOTRON_BASE_URL: ${{ secrets.NEMOTRON_BASE_URL }}
       NEMOTRON_MODEL: ${{ secrets.NEMOTRON_MODEL }}
       NEMOTRON_API_KEY: ${{ secrets.NEMOTRON_API_KEY }}
-      # Gold #8 showed provider contention/timeouts across all staff. Keep each
-      # isolated evaluation lightweight while preserving the production gates.
-      NEMOTRON_WORKER_TIMEOUT_SECONDS: "30"
-      NEMOTRON_WORKER_MAX_TOKENS: "256"
+      # Gold #9 showed the 30s worker timeout truncates slow provider calls
+      # (lightning-30b p50 ~12s, p95 ~60s), hard-failing correctness, recovery,
+      # and performance gates with TimeoutError. Give slow calls room to finish.
+      NEMOTRON_WORKER_TIMEOUT_SECONDS: "120"
+      NEMOTRON_WORKER_MAX_TOKENS: "1024"
       NEMOTRON_WORKER_MEMORY_LIMIT: "4"
       STAFF_WORKER_MAX_ATTEMPTS: "2"
       STAFF_WORKER_RETRY_INITIAL_SECONDS: "1"
