@@ -74,8 +74,14 @@ jobs:
           if [ "$missing" -ne 0 ]; then
             exit 2
           fi
-          echo "STAFF_CONTROL_API_TOKEN=$(openssl rand -hex 24)" >> "$GITHUB_ENV"
-          echo "STAFF_CAPABILITY_HMAC_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          control_token="$(openssl rand -hex 24)"
+          capability_secret="$(openssl rand -hex 32)"
+          echo "::add-mask::$control_token"
+          echo "::add-mask::$capability_secret"
+          {
+            echo "STAFF_CONTROL_API_TOKEN=$control_token"
+            echo "STAFF_CAPABILITY_HMAC_SECRET=$capability_secret"
+          } >> "$GITHUB_ENV"
 
       - name: Install evaluation dependencies
         run: |

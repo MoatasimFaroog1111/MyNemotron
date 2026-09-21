@@ -37,6 +37,8 @@ def test_live_gold_holdout_is_manual_only_and_not_pull_request_triggered() -> No
     assert 'STAFF_WORKER_MAX_ATTEMPTS: "2"' in workflow
     assert 'STAFF_WORKER_RETRY_INITIAL_SECONDS: "1"' in workflow
     assert 'STAFF_WORKER_RETRY_MAX_SECONDS: "2"' in workflow
+    assert 'echo "::add-mask::$control_token"' in workflow
+    assert 'echo "::add-mask::$capability_secret"' in workflow
     assert "staff-evaluation-live-${{ matrix.staff_id }}" in workflow
     assert "Validate and prepare live evaluation environment" in workflow
     assert "Missing required GitHub environment secret:" in workflow
