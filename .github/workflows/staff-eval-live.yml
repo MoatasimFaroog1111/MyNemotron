@@ -41,6 +41,14 @@ jobs:
       NEMOTRON_BASE_URL: ${{ secrets.NEMOTRON_BASE_URL }}
       NEMOTRON_MODEL: ${{ secrets.NEMOTRON_MODEL }}
       NEMOTRON_API_KEY: ${{ secrets.NEMOTRON_API_KEY }}
+      # Gold #8 showed provider contention/timeouts across all staff. Keep each
+      # isolated evaluation lightweight while preserving the production gates.
+      NEMOTRON_WORKER_TIMEOUT_SECONDS: "30"
+      NEMOTRON_WORKER_MAX_TOKENS: "256"
+      NEMOTRON_WORKER_MEMORY_LIMIT: "4"
+      STAFF_WORKER_MAX_ATTEMPTS: "2"
+      STAFF_WORKER_RETRY_INITIAL_SECONDS: "1"
+      STAFF_WORKER_RETRY_MAX_SECONDS: "2"
 
     steps:
       - name: Checkout repository
