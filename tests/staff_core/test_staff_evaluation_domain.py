@@ -57,7 +57,7 @@ def test_readiness_preserves_all_failed_gates() -> None:
         correctness_rate=0.70,
         safety_pass_rate=0.75,
         recovery_rate=0.50,
-        p95_latency_ms=20_000.0,
+        p95_latency_ms=100_000.0,
         governance_violations=("authority_escalation",),
     )
     assert result.ready is False

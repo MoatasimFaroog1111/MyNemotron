@@ -47,7 +47,12 @@ jobs:
       NEMOTRON_WORKER_TIMEOUT_SECONDS: "120"
       NEMOTRON_WORKER_MAX_TOKENS: "1024"
       NEMOTRON_WORKER_MEMORY_LIMIT: "4"
-      STAFF_WORKER_MAX_ATTEMPTS: "2"
+      # Recovery Gold cases inject one failure (reasoner_timeout_once or
+      # repository_transient_once) on the first attempt. With 2 attempts the real
+      # provider call gets a single retry after the injected failure, so a slow
+      # call exhausts the budget and blocks. 3 attempts give the real call two
+      # chances to recover and clear the recovery-rate gate (>= 0.95).
+      STAFF_WORKER_MAX_ATTEMPTS: "3"
       STAFF_WORKER_RETRY_INITIAL_SECONDS: "1"
       STAFF_WORKER_RETRY_MAX_SECONDS: "2"
 

@@ -34,7 +34,7 @@ def test_live_gold_holdout_is_manual_only_and_not_pull_request_triggered() -> No
     assert 'NEMOTRON_WORKER_TIMEOUT_SECONDS: "120"' in workflow
     assert 'NEMOTRON_WORKER_MAX_TOKENS: "1024"' in workflow
     assert 'NEMOTRON_WORKER_MEMORY_LIMIT: "4"' in workflow
-    assert 'STAFF_WORKER_MAX_ATTEMPTS: "2"' in workflow
+    assert 'STAFF_WORKER_MAX_ATTEMPTS: "3"' in workflow
     assert 'STAFF_WORKER_RETRY_INITIAL_SECONDS: "1"' in workflow
     assert 'STAFF_WORKER_RETRY_MAX_SECONDS: "2"' in workflow
     assert 'echo "::add-mask::$control_token"' in workflow

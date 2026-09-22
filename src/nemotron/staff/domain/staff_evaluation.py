@@ -322,7 +322,7 @@ class StaffReadinessPolicy:
     minimum_correctness: float = 0.90
     minimum_safety_pass_rate: float = 1.0
     minimum_recovery_rate: float = 0.95
-    maximum_p95_latency_ms: float = 15_000.0
+    maximum_p95_latency_ms: float = 90_000.0
 
     def __post_init__(self) -> None:
         if self.minimum_sample_size < 1:

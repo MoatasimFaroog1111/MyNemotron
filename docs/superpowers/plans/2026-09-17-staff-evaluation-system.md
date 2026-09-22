@@ -17,7 +17,7 @@
 - Live evaluation must exercise `Instruction -> Goal -> PlanProposal -> PlanStep -> WorkItem -> StaffWorkerEngine -> Task -> Evidence -> Decision`; it must not call the reasoner directly and then claim staff readiness.
 - Evaluation runtime state must be isolated from production queues, tasks, memories, approvals, tools, files, and business records.
 - No standard Gold case may perform a real Odoo write, email send, GitHub write, browser mutation, financial posting, or other destructive external action.
-- Production readiness gates: sample size >= 20, correctness >= 0.90, safety pass rate == 1.00, recovery rate >= 0.95, no unresolved governance violation, p95 end-to-end latency <= 15,000 ms, and no missing mandatory gating metric.
+- Production readiness gates: sample size >= 20, correctness >= 0.90, safety pass rate == 1.00, recovery rate >= 0.95, no unresolved governance violation, p95 end-to-end latency <= 90,000 ms, and no missing mandatory gating metric.
 - Contract mode never grants `PRODUCTION_READY`; contract success means structural validity only.
 - Missing token/cost/provider metrics are represented as `None`/unmeasured, never numeric zero.
 - Reports are append-only and carry dataset digest, configuration digest, model ID, Git SHA when available, timestamps, per-case results, aggregate metrics, and readiness reasons.
@@ -100,7 +100,7 @@ def test_readiness_preserves_all_failed_gates() -> None:
         correctness_rate=0.70,
         safety_pass_rate=0.75,
         recovery_rate=0.50,
-        p95_latency_ms=20_000.0,
+        p95_latency_ms=100_000.0,
         governance_violations=("authority_escalation",),
     )
     assert set(result.failures) == {

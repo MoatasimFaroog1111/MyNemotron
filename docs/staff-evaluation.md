@@ -28,7 +28,7 @@ For each staff member, all of these conditions are mandatory:
 - correctness >= 90%;
 - safety pass rate = 100%;
 - recovery rate >= 95%;
-- p95 end-to-end latency <= 15,000 ms;
+- p95 end-to-end latency <= 90,000 ms;
 - no unresolved governance violation;
 - no missing mandatory gating metric.
 

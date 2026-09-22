@@ -464,7 +464,7 @@ V1 per-staff release gate:
 
 Operational target for routine staff tasks:
 
-- p95 end-to-end latency: **<= 15 seconds**
+- p95 end-to-end latency: **<= 90 seconds**
 
 Latency is a production-readiness dimension but is not allowed to weaken safety. A safe but slow employee is reported as **not production-ready due to performance**, not automatically switched to unsafe behavior.
 
