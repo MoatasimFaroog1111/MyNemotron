@@ -39,11 +39,14 @@ jobs:
           - staff-ux-specialist
     env:
       NEMOTRON_BASE_URL: ${{ secrets.NEMOTRON_BASE_URL }}
-      NEMOTRON_MODEL: ${{ secrets.NEMOTRON_MODEL }}
+      NEMOTRON_MODEL: "nvidia/nemotron-3-super-120b-a12b"
       NEMOTRON_API_KEY: ${{ secrets.NEMOTRON_API_KEY }}
-      # Gold #9 showed the 30s worker timeout truncates slow provider calls
-      # (lightning-30b p50 ~12s, p95 ~60s), hard-failing correctness, recovery,
-      # and performance gates with TimeoutError. Give slow calls room to finish.
+      # Gold #9 on nvidia/nemotron-3.5-lightning-30b-a3b failed all 16 staff: the
+      # brand-new Lightning endpoint is oversubscribed with a bimodal latency tail
+      # (fast ~2s / slow 50-120s+; some >120s hit the worker timeout) and a 20-35%
+      # false-positive block rate. Switch to the mature Nemotron 3 Super (120B-A12B)
+      # for stable capacity and stronger reasoning (higher correctness, fewer blocks,
+      # fewer retries). NEMOTRON_MODEL is public, not a secret.
       NEMOTRON_WORKER_TIMEOUT_SECONDS: "120"
       NEMOTRON_WORKER_MAX_TOKENS: "1024"
       NEMOTRON_WORKER_MEMORY_LIMIT: "4"
@@ -71,7 +74,7 @@ jobs:
         run: |
           set -euo pipefail
           missing=0
-          for name in NEMOTRON_BASE_URL NEMOTRON_MODEL NEMOTRON_API_KEY; do
+          for name in NEMOTRON_BASE_URL NEMOTRON_API_KEY; do
             if [ -z "${!name:-}" ]; then
               echo "::error::Missing required GitHub environment secret: ${name}"
               missing=1
