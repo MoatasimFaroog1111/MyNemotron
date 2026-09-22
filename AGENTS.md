@@ -31,12 +31,17 @@ false-positive block rate. The readiness gates are impossible against this endpo
 No workflow-side timeout/attempts/parallelism tuning can pass the gates while the endpoint
 stays bimodal. **The fix is the endpoint/model, not the workflow.**
 
-## Recommended fix
+## Applied fix
 
-Switch `NEMOTRON_MODEL` to a faster, stable, less conservative model served with
-dedicated capacity (e.g. `nvidia/llama-3.3-nemotron-super-49b-v1.5`) or move to a paid/
-dedicated NIM tier to remove the free-tier rate-limiting that produces the bimodal tail.
-`NEMOTRON_MODEL` is public info and does not need to be a secret — only `NEMOTRON_API_KEY` is secret.
+`NEMOTRON_MODEL` was hardcoded to `nvidia/nemotron-3-super-120b-a12b` in
+`.github/workflows/staff-eval-live.yml` (commit `c7dd49c`) and removed from the secret
+check. Note: `nvidia/llama-3.3-nemotron-super-49b-v1.5` is NOT on `integrate.api.nvidia.com`.
+Valid hosted NIM ids can be listed with: `curl https://integrate.api.nvidia.com/v1/models`
+(no auth). `NEMOTRON_MODEL` is public — only `NEMOTRON_API_KEY` is secret.
+
+Validation run triggered via `workflow_dispatch` on `main` (`c7dd49c`); see the run URL
+in the task log. Re-aggregate reports from `evaluation-reports/*.json` artifacts after it
+finishes to confirm the gates now pass.
 
 ## Useful commands
 
