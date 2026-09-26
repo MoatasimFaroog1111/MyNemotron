@@ -1,0 +1,36 @@
+# =============================================================================
+#  Coolify variant of the MyNemotron staff-control-plane Railway service.
+#
+#  Railway ran: python /app/staff-entrypoint.py python -m nemotron.staff.control_plane
+#  (the Dockerfile ENTRYPOINT + CMD), bound to 0.0.0.0:8088. We use the image's
+#  default CMD unchanged; Coolify routes the domain to `app:8088`.
+#
+#  A named volume is mounted at /data for persistence (Railway had none here).
+#  Secrets/config are injected via Coolify env (`env_file: .env`).
+# =============================================================================
+
+name: mynemotron
+
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    expose:
+      - "8088"
+    env_file: .env
+    environment:
+      PORT: "8088"
+      STAFF_CONTROL_HOST: "0.0.0.0"
+      STAFF_CONTROL_PORT: "8088"
+      STAFF_DATA_DIR: "/data/staff"
+      STAFF_FILES_ROOT: "/data/files"
+    volumes:
+      - data:/data
+    networks: [app]
+
+volumes:
+  data:
+
+networks:
+  app:
+    driver: bridge
